@@ -1,1 +1,71 @@
 # AgameSM
+
+Python prototype workspace for auto-battler combat logic and collision-physics visualization.
+
+## 1) Basic Combat Demo
+
+Run sample auto-battler combat:
+
+```powershell
+python demo_battle.py
+```
+
+## 2) Visual Duel Physics Lab
+
+Run interactive 2-ball duel simulator:
+
+```powershell
+python visual_physics_lab.py
+```
+
+Default behavior:
+- left and right balls spawn on the ground
+- wide horizontal arena
+- on collision both balls are launched into a parabolic arc and bounce on ground
+- both balls get recoil; stronger ball is also pushed back briefly
+- after stagger, each ball re-charges toward its forward direction
+- `power` affects recoil/launch plus collision damage and stagger time
+
+What you can tune in real time:
+- left radius
+- left mass
+- left power
+- left hp
+- left initial speed
+- right radius
+- right mass
+- right power
+- right hp
+- right initial speed
+- gravity
+- approach force (how hard units push toward center)
+- restitution (bounciness)
+- collision friction
+- ground friction
+- linear damping
+- collision boost
+- solver passes
+- position correction
+- recoil/launch parameters
+- damage parameters
+- stagger parameters
+
+Controls:
+- `Space`: pause/resume
+- `R`: apply values and respawn
+- `K`: random impulse kick
+- `Enter`: apply values and respawn
+
+## 3) Tests
+
+```powershell
+python -m unittest discover -s tests -p "test_*.py" -v
+```
+
+If `python` command is not available in your shell:
+
+```powershell
+C:\Users\9nain\AppData\Local\Programs\Python\Python312\python.exe demo_battle.py
+C:\Users\9nain\AppData\Local\Programs\Python\Python312\python.exe visual_physics_lab.py
+C:\Users\9nain\AppData\Local\Programs\Python\Python312\python.exe -m unittest discover -s tests -p "test_*.py" -v
+```
