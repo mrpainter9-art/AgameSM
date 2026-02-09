@@ -19,16 +19,19 @@ Default behavior:
 - `power` affects recoil/launch plus collision damage and stagger time
 
 What you can tune in real time:
+- balls per side
 - left radius
 - left mass
 - left power
 - left hp
 - left initial speed
+- left invincible
 - right radius
 - right mass
 - right power
 - right hp
 - right initial speed
+- right invincible
 - gravity
 - approach force (how hard units push toward center)
 - restitution (bounciness)
@@ -38,7 +41,9 @@ What you can tune in real time:
 - collision boost
 - solver passes
 - position correction
+- mass+power impact scale
 - recoil/launch parameters
+- launch height scale (multiplier for collision pop-up height)
 - damage parameters
 - stagger parameters
 

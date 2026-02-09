@@ -58,12 +58,14 @@ class PhysicsTuning:
     collision_boost: float = 1.0
     solver_passes: int = 3
     position_correction: float = 0.80
+    mass_power_impact_scale: float = 120.0
     power_ratio_exponent: float = 0.50
     impact_speed_cap: float = 1400.0
     min_recoil_speed: float = 45.0
     recoil_scale: float = 0.62
     min_launch_speed: float = 90.0
     launch_scale: float = 0.45
+    launch_height_scale: float = 1.0
     max_launch_speed: float = 820.0
     damage_base: float = 1.5
     damage_scale: float = 0.028
@@ -93,6 +95,8 @@ class PhysicsTuning:
             raise ValueError("solver_passes must be > 0")
         if not 0 <= self.position_correction <= 1:
             raise ValueError("position_correction must be in [0, 1]")
+        if self.mass_power_impact_scale <= 0:
+            raise ValueError("mass_power_impact_scale must be > 0")
         if self.power_ratio_exponent < 0:
             raise ValueError("power_ratio_exponent must be >= 0")
         if self.impact_speed_cap <= 0:
@@ -105,6 +109,8 @@ class PhysicsTuning:
             raise ValueError("min_launch_speed must be >= 0")
         if self.launch_scale < 0:
             raise ValueError("launch_scale must be >= 0")
+        if self.launch_height_scale <= 0:
+            raise ValueError("launch_height_scale must be > 0")
         if self.max_launch_speed <= 0:
             raise ValueError("max_launch_speed must be > 0")
         if self.damage_base < 0:
@@ -131,15 +137,28 @@ class PhysicsWorld:
     total_collisions: int = 0
     last_step_collisions: int = 0
     active_contacts: set[tuple[int, int]] = field(default_factory=set)
+    invincible_teams: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         if self.width <= 0 or self.height <= 0:
             raise ValueError("world size must be > 0")
         self.tuning.validate()
+        self.set_invincible_teams(self.invincible_teams)
 
     def set_tuning(self, tuning: PhysicsTuning) -> None:
         tuning.validate()
         self.tuning = tuning
+
+    def set_invincible_teams(self, teams: set[str] | list[str] | tuple[str, ...]) -> None:
+        normalized = set()
+        for team in teams:
+            team_name = str(team).strip().lower()
+            if team_name:
+                normalized.add(team_name)
+        self.invincible_teams = normalized
+
+    def is_team_invincible(self, team: str) -> bool:
+        return team.strip().lower() in self.invincible_teams
 
     def add_random_impulse(self, *, magnitude: float = 420.0, seed: int | None = None) -> None:
         if magnitude <= 0:
@@ -247,6 +266,8 @@ class PhysicsWorld:
             a = self.bodies[i]
             for j in range(i + 1, count):
                 b = self.bodies[j]
+                if a.team == b.team:
+                    continue
                 dx = b.x - a.x
                 dy = b.y - a.y
                 radii = a.radius + b.radius
@@ -322,38 +343,45 @@ class PhysicsWorld:
                     and pair not in impact_pairs
                     and rel_normal_speed < 0
                 ):
-                    impact_speed = min(self.tuning.impact_speed_cap, -rel_normal_speed)
-                    self._apply_impact_effects(a, b, nx, impact_speed)
+                    self._apply_impact_effects(a, b, nx)
                     impact_pairs.add(pair)
 
                 collisions += 1
 
         return collisions
 
-    def _incoming_strength(self, attacker: PhysicsBody, defender: PhysicsBody, impact_speed: float) -> float:
-        ratio = max(1e-6, attacker.power) / max(1e-6, defender.power)
-        return impact_speed * (ratio ** self.tuning.power_ratio_exponent)
+    def _incoming_strength(self, attacker: PhysicsBody, defender: PhysicsBody) -> float:
+        power_ratio = max(1e-6, attacker.power) / max(1e-6, defender.power)
+        mass_ratio = attacker.mass / max(1e-6, defender.mass)
+        scaled = self.tuning.mass_power_impact_scale * mass_ratio
+        scaled *= power_ratio ** self.tuning.power_ratio_exponent
+        return min(self.tuning.impact_speed_cap, scaled)
 
     def _apply_impact_effects(
         self,
         a: PhysicsBody,
         b: PhysicsBody,
         nx: float,
-        impact_speed: float,
     ) -> None:
-        incoming_a = self._incoming_strength(b, a, impact_speed)
-        incoming_b = self._incoming_strength(a, b, impact_speed)
+        incoming_a = self._incoming_strength(b, a)
+        incoming_b = self._incoming_strength(a, b)
 
         recoil_a = self.tuning.min_recoil_speed + (incoming_a * self.tuning.recoil_scale)
         recoil_b = self.tuning.min_recoil_speed + (incoming_b * self.tuning.recoil_scale)
 
         launch_a = min(
             self.tuning.max_launch_speed,
-            self.tuning.min_launch_speed + (incoming_a * self.tuning.launch_scale),
+            (
+                self.tuning.min_launch_speed + (incoming_a * self.tuning.launch_scale)
+            )
+            * self.tuning.launch_height_scale,
         )
         launch_b = min(
             self.tuning.max_launch_speed,
-            self.tuning.min_launch_speed + (incoming_b * self.tuning.launch_scale),
+            (
+                self.tuning.min_launch_speed + (incoming_b * self.tuning.launch_scale)
+            )
+            * self.tuning.launch_height_scale,
         )
 
         a.vx -= nx * (recoil_a / a.mass)
@@ -363,8 +391,14 @@ class PhysicsWorld:
 
         damage_a = self.tuning.damage_base + (incoming_a * self.tuning.damage_scale)
         damage_b = self.tuning.damage_base + (incoming_b * self.tuning.damage_scale)
-        a.hp = max(0.0, a.hp - damage_a)
-        b.hp = max(0.0, b.hp - damage_b)
+        if self.is_team_invincible(a.team):
+            damage_a = 0.0
+        else:
+            a.hp = max(0.0, a.hp - damage_a)
+        if self.is_team_invincible(b.team):
+            damage_b = 0.0
+        else:
+            b.hp = max(0.0, b.hp - damage_b)
         a.last_damage = damage_a
         b.last_damage = damage_b
 
@@ -394,53 +428,77 @@ def create_duel_world(
     right_hp: float = 100.0,
     left_initial_speed: float = 260.0,
     right_initial_speed: float = 210.0,
+    balls_per_side: int = 1,
     side_margin: float = 120.0,
+    left_invincible: bool = False,
+    right_invincible: bool = False,
     tuning: PhysicsTuning | None = None,
 ) -> PhysicsWorld:
     if width <= 0 or height <= 0:
         raise ValueError("world size must be > 0")
     if side_margin < 0:
         raise ValueError("side_margin must be >= 0")
+    if balls_per_side <= 0:
+        raise ValueError("balls_per_side must be > 0")
 
-    left_x = side_margin + left_radius
-    right_x = width - side_margin - right_radius
+    left_spacing = left_radius * 2.3
+    right_spacing = right_radius * 2.3
+    left_start_x = side_margin + left_radius
+    right_start_x = width - side_margin - right_radius
 
-    left_body = PhysicsBody(
-        body_id=0,
-        team="left",
-        x=left_x,
-        y=height - left_radius,
-        vx=abs(left_initial_speed),
-        vy=0.0,
-        radius=left_radius,
-        mass=left_mass,
-        color="#4aa3ff",
-        power=left_power,
-        forward_dir=1.0,
-        max_hp=max(1.0, left_hp),
-        hp=max(0.0, left_hp),
-    )
-    right_body = PhysicsBody(
-        body_id=1,
-        team="right",
-        x=right_x,
-        y=height - right_radius,
-        vx=-abs(right_initial_speed),
-        vy=0.0,
-        radius=right_radius,
-        mass=right_mass,
-        color="#f26b5e",
-        power=right_power,
-        forward_dir=-1.0,
-        max_hp=max(1.0, right_hp),
-        hp=max(0.0, right_hp),
-    )
+    bodies: list[PhysicsBody] = []
+    for idx in range(balls_per_side):
+        left_x = min(width - left_radius, max(left_radius, left_start_x + (idx * left_spacing)))
+        right_x = min(
+            width - right_radius,
+            max(right_radius, right_start_x - (idx * right_spacing)),
+        )
+
+        bodies.append(
+            PhysicsBody(
+                body_id=len(bodies),
+                team="left",
+                x=left_x,
+                y=height - left_radius,
+                vx=abs(left_initial_speed),
+                vy=0.0,
+                radius=left_radius,
+                mass=left_mass,
+                color="#4aa3ff",
+                power=left_power,
+                forward_dir=1.0,
+                max_hp=max(1.0, left_hp),
+                hp=max(0.0, left_hp),
+            )
+        )
+        bodies.append(
+            PhysicsBody(
+                body_id=len(bodies),
+                team="right",
+                x=right_x,
+                y=height - right_radius,
+                vx=-abs(right_initial_speed),
+                vy=0.0,
+                radius=right_radius,
+                mass=right_mass,
+                color="#f26b5e",
+                power=right_power,
+                forward_dir=-1.0,
+                max_hp=max(1.0, right_hp),
+                hp=max(0.0, right_hp),
+            )
+        )
 
     return PhysicsWorld(
         width=width,
         height=height,
-        bodies=[left_body, right_body],
+        bodies=bodies,
         tuning=tuning or PhysicsTuning(),
+        invincible_teams={
+            team
+            for team, is_enabled in (("left", left_invincible), ("right", right_invincible))
+            if is_enabled
+        },
     )
 
 

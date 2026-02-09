@@ -8,6 +8,98 @@ from autochess_combat import PhysicsTuning, create_duel_world
 from autochess_combat.physics_lab import PhysicsBody, PhysicsWorld
 
 
+FIELD_HELP_KO: dict[str, str] = {
+    "balls_per_side": "좌/우 팀당 생성할 볼 개수. 기본 3.",
+    "left_radius": "왼쪽 공 반지름(px). 값이 커질수록 충돌 범위가 넓어집니다.",
+    "left_mass": "왼쪽 공 질량. 클수록 같은 힘에서 덜 밀리고, 반동/발사 속도 변화가 줄어듭니다.",
+    "left_power": "왼쪽 공 파워. 클수록 충돌 시 상대에게 주는 반동/피해/경직 영향이 커집니다.",
+    "left_hp": "왼쪽 공 최대 체력(리스폰 시 적용).",
+    "left_speed": "왼쪽 공 시작 수평 속도(px/s).",
+    "left_invincible": "왼쪽 팀 무적 모드. 켜면 HP가 줄지 않습니다.",
+    "right_radius": "오른쪽 공 반지름(px).",
+    "right_mass": "오른쪽 공 질량.",
+    "right_power": "오른쪽 공 파워.",
+    "right_hp": "오른쪽 공 최대 체력(리스폰 시 적용).",
+    "right_speed": "오른쪽 공 시작 수평 속도(px/s).",
+    "right_invincible": "오른쪽 팀 무적 모드. 켜면 HP가 줄지 않습니다.",
+    "side_margin": "양쪽 벽에서 스폰되는 여백 거리(px).",
+    "gravity": "중력 가속도(px/s^2). 높일수록 더 빨리 떨어져 낮게 뜹니다.",
+    "approach_force": "정면 방향으로 밀어주는 추진력. 경직이 끝난 뒤 다시 돌진하는 속도에 영향.",
+    "restitution": "공-공 충돌 탄성 계수. 높을수록 더 튕깁니다.",
+    "wall_restitution": "벽/바닥 반발 계수.",
+    "linear_damping": "공기저항(속도 감쇠). 높을수록 전체 속도가 빨리 줄어듭니다.",
+    "friction": "공-공 충돌 시 접선 마찰.",
+    "wall_friction": "벽 충돌 시 접선 마찰.",
+    "ground_friction": "바닥에서 미끄러질 때 감속 마찰.",
+    "ground_snap_speed": "이 속도 이하로 바닥에 닿으면 y속도를 0으로 스냅합니다.",
+    "collision_boost": "충돌 임펄스 전체 배율. 충돌 반응을 강하게/약하게 만듭니다.",
+    "solver_passes": "충돌 해석 반복 횟수. 높을수록 안정적이지만 계산량이 늘어납니다.",
+    "position_correction": "겹침 보정 강도(0~1).",
+    "mass_power_impact_scale": "질량+파워 기반 충돌 영향량의 전체 배율.",
+    "power_ratio_exponent": "파워 비율이 충돌 영향량에 반영되는 정도.",
+    "impact_speed_cap": "충돌 영향량 상한(과도한 값 제한).",
+    "min_recoil_speed": "충돌 시 최소 수평 반동량.",
+    "recoil_scale": "충돌 강도에 따른 수평 반동 증가율.",
+    "min_launch_speed": "충돌 시 최소 수직 발사량(위로 튀는 기본값).",
+    "launch_scale": "충돌 강도에 따른 수직 발사 증가율.",
+    "launch_height_scale": (
+        "충돌 후 튀어오르는 높이 배율. 1.0 기본, 2.0이면 더 높게 뜹니다 "
+        "(최종 발사량은 Max Launch Speed 상한 적용)."
+    ),
+    "max_launch_speed": "수직 발사량 상한.",
+    "damage_base": "충돌 시 기본 피해량.",
+    "damage_scale": "충돌 강도에 따른 피해 증가율.",
+    "stagger_base": "충돌 시 기본 경직 시간(초).",
+    "stagger_scale": "충돌 강도에 따른 경직 증가율.",
+    "max_stagger": "경직 시간 상한(초).",
+    "stagger_drive_multiplier": "경직 중 이동 추진력 배율(0이면 경직 중 거의 정지).",
+}
+
+
+class HoverTooltip:
+    def __init__(self, root: tk.Tk) -> None:
+        self.root = root
+        self.window: tk.Toplevel | None = None
+        self.label: tk.Label | None = None
+
+    def show(self, text: str, x: int, y: int) -> None:
+        if not text:
+            return
+        if self.window is None or not self.window.winfo_exists():
+            self.window = tk.Toplevel(self.root)
+            self.window.withdraw()
+            self.window.overrideredirect(True)
+            try:
+                self.window.attributes("-topmost", True)
+            except tk.TclError:
+                pass
+            self.label = tk.Label(
+                self.window,
+                text="",
+                justify="left",
+                bg="#121923",
+                fg="#dce6f2",
+                relief="solid",
+                bd=1,
+                font=("Segoe UI", 9),
+                padx=8,
+                pady=6,
+                wraplength=320,
+            )
+            self.label.pack()
+
+        if self.label is None:
+            return
+        self.label.configure(text=text)
+        self.window.geometry(f"+{x + 14}+{y + 14}")
+        self.window.deiconify()
+        self.window.lift()
+
+    def hide(self) -> None:
+        if self.window is not None and self.window.winfo_exists():
+            self.window.withdraw()
+
+
 class PhysicsLabApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -21,18 +113,22 @@ class PhysicsLabApp:
         self.paused = False
         self.status_message = "Simulation started."
         self.controls_wraplength = 300
+        self.tooltip = HoverTooltip(root)
 
         self.vars: dict[str, tk.Variable] = {
+            "balls_per_side": tk.IntVar(value=3),
             "left_radius": tk.DoubleVar(value=32.0),
             "left_mass": tk.DoubleVar(value=1.0),
             "left_power": tk.DoubleVar(value=1.0),
             "left_hp": tk.DoubleVar(value=100.0),
             "left_speed": tk.DoubleVar(value=260.0),
+            "left_invincible": tk.BooleanVar(value=False),
             "right_radius": tk.DoubleVar(value=32.0),
             "right_mass": tk.DoubleVar(value=1.4),
             "right_power": tk.DoubleVar(value=1.8),
             "right_hp": tk.DoubleVar(value=100.0),
             "right_speed": tk.DoubleVar(value=210.0),
+            "right_invincible": tk.BooleanVar(value=False),
             "side_margin": tk.DoubleVar(value=120.0),
             "gravity": tk.DoubleVar(value=900.0),
             "approach_force": tk.DoubleVar(value=1150.0),
@@ -46,12 +142,14 @@ class PhysicsLabApp:
             "collision_boost": tk.DoubleVar(value=1.00),
             "solver_passes": tk.IntVar(value=3),
             "position_correction": tk.DoubleVar(value=0.80),
+            "mass_power_impact_scale": tk.DoubleVar(value=120.0),
             "power_ratio_exponent": tk.DoubleVar(value=0.50),
             "impact_speed_cap": tk.DoubleVar(value=1400.0),
             "min_recoil_speed": tk.DoubleVar(value=45.0),
             "recoil_scale": tk.DoubleVar(value=0.62),
             "min_launch_speed": tk.DoubleVar(value=90.0),
             "launch_scale": tk.DoubleVar(value=0.45),
+            "launch_height_scale": tk.DoubleVar(value=1.0),
             "max_launch_speed": tk.DoubleVar(value=820.0),
             "damage_base": tk.DoubleVar(value=1.50),
             "damage_scale": tk.DoubleVar(value=0.028),
@@ -107,6 +205,8 @@ class PhysicsLabApp:
         controls = self.controls_frame
 
         row = 0
+        row = self._add_field(controls, row, "balls_per_side", "Balls Per Side")
+
         ttk.Label(controls, text="Left Ball", font=("Segoe UI", 10, "bold")).grid(
             row=row, column=0, columnspan=2, sticky="w", pady=(0, 6)
         )
@@ -119,6 +219,7 @@ class PhysicsLabApp:
             ("left_speed", "Initial Speed"),
         ]:
             row = self._add_field(controls, row, key, label)
+        row = self._add_toggle(controls, row, "left_invincible", "Invincible")
 
         ttk.Label(controls, text="Right Ball", font=("Segoe UI", 10, "bold")).grid(
             row=row, column=0, columnspan=2, sticky="w", pady=(10, 6)
@@ -132,6 +233,7 @@ class PhysicsLabApp:
             ("right_speed", "Initial Speed"),
         ]:
             row = self._add_field(controls, row, key, label)
+        row = self._add_toggle(controls, row, "right_invincible", "Invincible")
 
         ttk.Label(controls, text="Motion / Contact", font=("Segoe UI", 10, "bold")).grid(
             row=row, column=0, columnspan=2, sticky="w", pady=(10, 6)
@@ -160,11 +262,13 @@ class PhysicsLabApp:
         row += 1
         for key, label in [
             ("power_ratio_exponent", "Power Ratio Exp"),
+            ("mass_power_impact_scale", "Mass+Power Scale"),
             ("impact_speed_cap", "Impact Speed Cap"),
             ("min_recoil_speed", "Min Recoil Speed"),
             ("recoil_scale", "Recoil Scale"),
             ("min_launch_speed", "Min Launch Speed"),
             ("launch_scale", "Launch Scale"),
+            ("launch_height_scale", "Launch Height Scale"),
             ("max_launch_speed", "Max Launch Speed"),
             ("damage_base", "Damage Base"),
             ("damage_scale", "Damage Scale"),
@@ -213,9 +317,34 @@ class PhysicsLabApp:
         self.status_label.grid(row=row, column=0, columnspan=2, sticky="w")
 
     def _add_field(self, parent: ttk.Frame, row: int, key: str, label: str) -> int:
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=2)
-        ttk.Entry(parent, textvariable=self.vars[key], width=13).grid(row=row, column=1, sticky="ew", pady=2)
+        label_widget = ttk.Label(parent, text=label)
+        label_widget.grid(row=row, column=0, sticky="w", padx=(0, 8), pady=2)
+        entry_widget = ttk.Entry(parent, textvariable=self.vars[key], width=13)
+        entry_widget.grid(row=row, column=1, sticky="ew", pady=2)
+        self._bind_field_help(label_widget, key)
+        self._bind_field_help(entry_widget, key)
         return row + 1
+
+    def _add_toggle(self, parent: ttk.Frame, row: int, key: str, label: str) -> int:
+        label_widget = ttk.Label(parent, text=label)
+        label_widget.grid(row=row, column=0, sticky="w", padx=(0, 8), pady=2)
+        toggle_widget = ttk.Checkbutton(parent, variable=self.vars[key])
+        toggle_widget.grid(row=row, column=1, sticky="w", pady=2)
+        self._bind_field_help(label_widget, key)
+        self._bind_field_help(toggle_widget, key)
+        return row + 1
+
+    def _bind_field_help(self, widget: tk.Widget, key: str) -> None:
+        widget.bind("<Enter>", lambda event, field=key: self._show_field_help(event, field))
+        widget.bind("<Motion>", lambda event, field=key: self._show_field_help(event, field))
+        widget.bind("<Leave>", lambda _: self.tooltip.hide())
+
+    def _show_field_help(self, event: tk.Event, key: str) -> None:
+        help_text = FIELD_HELP_KO.get(key)
+        if help_text is None:
+            self.tooltip.hide()
+            return
+        self.tooltip.show(help_text, event.x_root, event.y_root)
 
     def _on_canvas_resize(self, event: tk.Event) -> None:
         new_width = max(1, int(event.width))
@@ -258,6 +387,7 @@ class PhysicsLabApp:
     def _on_controls_mousewheel(self, event: tk.Event) -> None:
         if event.delta == 0:
             return
+        self.tooltip.hide()
         self.controls_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def _bind_keys(self) -> None:
@@ -280,12 +410,14 @@ class PhysicsLabApp:
             collision_boost=float(self.vars["collision_boost"].get()),
             solver_passes=int(self.vars["solver_passes"].get()),
             position_correction=float(self.vars["position_correction"].get()),
+            mass_power_impact_scale=float(self.vars["mass_power_impact_scale"].get()),
             power_ratio_exponent=float(self.vars["power_ratio_exponent"].get()),
             impact_speed_cap=float(self.vars["impact_speed_cap"].get()),
             min_recoil_speed=float(self.vars["min_recoil_speed"].get()),
             recoil_scale=float(self.vars["recoil_scale"].get()),
             min_launch_speed=float(self.vars["min_launch_speed"].get()),
             launch_scale=float(self.vars["launch_scale"].get()),
+            launch_height_scale=float(self.vars["launch_height_scale"].get()),
             max_launch_speed=float(self.vars["max_launch_speed"].get()),
             damage_base=float(self.vars["damage_base"].get()),
             damage_scale=float(self.vars["damage_scale"].get()),
@@ -300,6 +432,7 @@ class PhysicsLabApp:
         return create_duel_world(
             width=self.canvas_width,
             height=self.canvas_height,
+            balls_per_side=int(self.vars["balls_per_side"].get()),
             left_radius=float(self.vars["left_radius"].get()),
             right_radius=float(self.vars["right_radius"].get()),
             left_mass=float(self.vars["left_mass"].get()),
@@ -311,16 +444,27 @@ class PhysicsLabApp:
             left_initial_speed=float(self.vars["left_speed"].get()),
             right_initial_speed=float(self.vars["right_speed"].get()),
             side_margin=float(self.vars["side_margin"].get()),
+            left_invincible=bool(self.vars["left_invincible"].get()),
+            right_invincible=bool(self.vars["right_invincible"].get()),
             tuning=tuning,
         )
+
+    def _selected_invincible_teams(self) -> set[str]:
+        teams: set[str] = set()
+        if bool(self.vars["left_invincible"].get()):
+            teams.add("left")
+        if bool(self.vars["right_invincible"].get()):
+            teams.add("right")
+        return teams
 
     def apply_no_respawn(self) -> None:
         try:
             self.world.set_tuning(self._build_tuning())
+            self.world.set_invincible_teams(self._selected_invincible_teams())
         except ValueError as exc:
             messagebox.showerror("Invalid value", str(exc))
             return
-        self.status_message = "Applied tuning without respawn."
+        self.status_message = "Applied tuning/invincible settings without respawn."
         self._refresh_status()
 
     def apply_and_respawn(self) -> None:
@@ -329,7 +473,8 @@ class PhysicsLabApp:
         except ValueError as exc:
             messagebox.showerror("Invalid value", str(exc))
             return
-        self.status_message = "Applied values and respawned both balls on ground."
+        balls_per_side = int(self.vars["balls_per_side"].get())
+        self.status_message = f"Applied values and respawned {balls_per_side} balls per side."
         self._refresh_status()
 
     def random_kick(self) -> None:
@@ -348,25 +493,32 @@ class PhysicsLabApp:
         self.status_message = "Advanced one physics tick."
         self._refresh_status()
 
-    def _find_body(self, team: str) -> PhysicsBody | None:
-        for body in self.world.bodies:
-            if body.team == team:
-                return body
-        return None
+    def _team_bodies(self, team: str) -> list[PhysicsBody]:
+        return [body for body in self.world.bodies if body.team == team]
+
+    def _team_live_stats(self, team: str) -> tuple[int, int, float, float, float]:
+        bodies = self._team_bodies(team)
+        if not bodies:
+            return 0, 0, 0.0, 0.0, 0.0
+
+        count = len(bodies)
+        alive_count = sum(1 for body in bodies if body.is_alive)
+        avg_hp = sum(body.hp for body in bodies) / count
+        avg_stagger = sum(body.stagger_timer for body in bodies) / count
+        avg_speed = (
+            sum((body.vx * body.vx + body.vy * body.vy) ** 0.5 for body in bodies) / count
+        )
+        return count, alive_count, avg_hp, avg_stagger, avg_speed
 
     def _refresh_status(self) -> None:
-        left = self._find_body("left")
-        right = self._find_body("right")
-        left_speed = 0.0 if left is None else (left.vx * left.vx + left.vy * left.vy) ** 0.5
-        right_speed = 0.0 if right is None else (right.vx * right.vx + right.vy * right.vy) ** 0.5
-        left_hp = 0.0 if left is None else left.hp
-        right_hp = 0.0 if right is None else right.hp
-        left_stagger = 0.0 if left is None else left.stagger_timer
-        right_stagger = 0.0 if right is None else right.stagger_timer
+        left_count, left_alive, left_hp, left_stagger, left_speed = self._team_live_stats("left")
+        right_count, right_alive, right_hp, right_stagger, right_speed = self._team_live_stats("right")
+        left_mode = "INV" if self.world.is_team_invincible("left") else "DMG"
+        right_mode = "INV" if self.world.is_team_invincible("right") else "DMG"
         live = (
             f"time={self.world.time_elapsed:6.2f}s | "
-            f"L hp={left_hp:6.1f} stg={left_stagger:4.2f} spd={left_speed:7.2f} | "
-            f"R hp={right_hp:6.1f} stg={right_stagger:4.2f} spd={right_speed:7.2f} | "
+            f"L {left_alive}/{left_count} {left_mode} hp={left_hp:6.1f} stg={left_stagger:4.2f} spd={left_speed:7.2f} | "
+            f"R {right_alive}/{right_count} {right_mode} hp={right_hp:6.1f} stg={right_stagger:4.2f} spd={right_speed:7.2f} | "
             f"step_collisions={self.world.last_step_collisions:2d}"
         )
         self.status_var.set(f"{self.status_message}\n{live}")
@@ -432,7 +584,11 @@ class PhysicsLabApp:
             self.canvas.create_text(
                 body.x,
                 body.y - r - 28,
-                text=f"{body.team} HP={body.hp:5.1f}/{body.max_hp:5.1f}",
+                text=(
+                    f"{body.team} "
+                    f"{'INV' if self.world.is_team_invincible(body.team) else 'DMG'} "
+                    f"HP={body.hp:5.1f}/{body.max_hp:5.1f}"
+                ),
                 fill="#dce6f2",
                 font=("Consolas", 10),
             )
