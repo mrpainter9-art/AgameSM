@@ -1,6 +1,5 @@
-"""Small auto-battler combat prototype package."""
+"""Small physics lab prototype package."""
 
-from .core import BattleResult, UnitSpec, simulate_battle
 from .physics_lab import (
     PhysicsBody,
     PhysicsTuning,
@@ -10,9 +9,6 @@ from .physics_lab import (
 )
 
 __all__ = [
-    "UnitSpec",
-    "BattleResult",
-    "simulate_battle",
     "PhysicsBody",
     "PhysicsTuning",
     "PhysicsWorld",

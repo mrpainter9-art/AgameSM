@@ -1,16 +1,8 @@
 # AgameSM
 
-Python prototype workspace for auto-battler combat logic and collision-physics visualization.
+Python prototype workspace for collision-physics visualization.
 
-## 1) Basic Combat Demo
-
-Run sample auto-battler combat:
-
-```powershell
-python demo_battle.py
-```
-
-## 2) Visual Duel Physics Lab
+## 1) Visual Duel Physics Lab
 
 Run interactive 2-ball duel simulator:
 
@@ -56,7 +48,7 @@ Controls:
 - `K`: random impulse kick
 - `Enter`: apply values and respawn
 
-## 3) Tests
+## 2) Tests
 
 ```powershell
 python -m unittest discover -s tests -p "test_*.py" -v
@@ -65,7 +57,6 @@ python -m unittest discover -s tests -p "test_*.py" -v
 If `python` command is not available in your shell:
 
 ```powershell
-C:\Users\9nain\AppData\Local\Programs\Python\Python312\python.exe demo_battle.py
 C:\Users\9nain\AppData\Local\Programs\Python\Python312\python.exe visual_physics_lab.py
 C:\Users\9nain\AppData\Local\Programs\Python\Python312\python.exe -m unittest discover -s tests -p "test_*.py" -v
 ```

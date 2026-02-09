@@ -20,6 +20,7 @@ class PhysicsLabApp:
         self.last_frame_time = time.perf_counter()
         self.paused = False
         self.status_message = "Simulation started."
+        self.controls_wraplength = 300
 
         self.vars: dict[str, tk.Variable] = {
             "left_radius": tk.DoubleVar(value=32.0),
@@ -79,9 +80,31 @@ class PhysicsLabApp:
             highlightthickness=0,
         )
         self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.canvas.bind("<Configure>", self._on_canvas_resize)
 
-        controls = ttk.Frame(container, padding=(12, 4, 0, 4))
-        controls.grid(row=0, column=1, sticky="ns")
+        controls_outer = ttk.Frame(container, padding=(12, 4, 0, 4))
+        controls_outer.grid(row=0, column=1, sticky="ns")
+        controls_outer.rowconfigure(0, weight=1)
+        controls_outer.columnconfigure(0, weight=1)
+
+        self.controls_canvas = tk.Canvas(controls_outer, width=340, highlightthickness=0)
+        self.controls_canvas.grid(row=0, column=0, sticky="nsew")
+        controls_scroll = ttk.Scrollbar(
+            controls_outer, orient="vertical", command=self.controls_canvas.yview
+        )
+        controls_scroll.grid(row=0, column=1, sticky="ns")
+        self.controls_canvas.configure(yscrollcommand=controls_scroll.set)
+
+        self.controls_frame = ttk.Frame(self.controls_canvas)
+        self.controls_window = self.controls_canvas.create_window(
+            (0, 0), window=self.controls_frame, anchor="nw"
+        )
+        self.controls_frame.bind("<Configure>", self._on_controls_frame_configure)
+        self.controls_canvas.bind("<Configure>", self._on_controls_canvas_configure)
+        self.controls_canvas.bind("<MouseWheel>", self._on_controls_mousewheel)
+        self.controls_frame.bind("<MouseWheel>", self._on_controls_mousewheel)
+
+        controls = self.controls_frame
 
         row = 0
         ttk.Label(controls, text="Left Ball", font=("Segoe UI", 10, "bold")).grid(
@@ -173,21 +196,69 @@ class PhysicsLabApp:
         )
         row += 1
 
-        ttk.Label(
+        self.keys_label = ttk.Label(
             controls,
             text="Keys: Space pause, R respawn, K random kick, Enter apply+respawn",
-            wraplength=300,
+            wraplength=self.controls_wraplength,
             justify="left",
-        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 6))
-        row += 1
-        ttk.Label(controls, textvariable=self.status_var, wraplength=300, justify="left").grid(
-            row=row, column=0, columnspan=2, sticky="w"
         )
+        self.keys_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 6))
+        row += 1
+        self.status_label = ttk.Label(
+            controls,
+            textvariable=self.status_var,
+            wraplength=self.controls_wraplength,
+            justify="left",
+        )
+        self.status_label.grid(row=row, column=0, columnspan=2, sticky="w")
 
     def _add_field(self, parent: ttk.Frame, row: int, key: str, label: str) -> int:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=2)
         ttk.Entry(parent, textvariable=self.vars[key], width=13).grid(row=row, column=1, sticky="ew", pady=2)
         return row + 1
+
+    def _on_canvas_resize(self, event: tk.Event) -> None:
+        new_width = max(1, int(event.width))
+        new_height = max(1, int(event.height))
+        if new_width == self.canvas_width and new_height == self.canvas_height:
+            return
+
+        delta_h = new_height - self.canvas_height
+        self.canvas_width = new_width
+        self.canvas_height = new_height
+        self.world.width = float(new_width)
+        self.world.height = float(new_height)
+
+        if abs(delta_h) > 1e-6:
+            for body in self.world.bodies:
+                body.y += delta_h
+
+        for body in self.world.bodies:
+            r = body.radius
+            body.x = min(self.world.width - r, max(r, body.x))
+            body.y = min(self.world.height - r, max(r, body.y))
+
+    def _on_controls_frame_configure(self, _: tk.Event) -> None:
+        bbox = self.controls_canvas.bbox("all")
+        if bbox is not None:
+            self.controls_canvas.configure(scrollregion=bbox)
+
+    def _on_controls_canvas_configure(self, event: tk.Event) -> None:
+        self.controls_canvas.itemconfigure(self.controls_window, width=event.width)
+        wrap = max(200, event.width - 20)
+        if wrap != self.controls_wraplength:
+            self.controls_wraplength = wrap
+            keys_label = getattr(self, "keys_label", None)
+            status_label = getattr(self, "status_label", None)
+            if keys_label is not None:
+                keys_label.configure(wraplength=wrap)
+            if status_label is not None:
+                status_label.configure(wraplength=wrap)
+
+    def _on_controls_mousewheel(self, event: tk.Event) -> None:
+        if event.delta == 0:
+            return
+        self.controls_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def _bind_keys(self) -> None:
         self.root.bind("<space>", lambda _: self.toggle_pause())
