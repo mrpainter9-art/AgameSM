@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import time
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -54,6 +56,9 @@ FIELD_HELP_KO: dict[str, str] = {
     "max_stagger": "경직 시간 상한(초).",
     "stagger_drive_multiplier": "경직 중 이동 추진력 배율(0이면 경직 중 거의 정지).",
 }
+
+SETTINGS_FILE_NAME = "visual_physics_lab_settings.json"
+SETTINGS_VERSION = 1
 
 
 class HoverTooltip:
@@ -158,11 +163,18 @@ class PhysicsLabApp:
             "max_stagger": tk.DoubleVar(value=1.20),
             "stagger_drive_multiplier": tk.DoubleVar(value=0.0),
         }
+        self.lock_vars: dict[str, tk.BooleanVar] = {
+            key: tk.BooleanVar(value=False) for key in self.vars
+        }
+        self.value_widgets: dict[str, tk.Widget] = {}
+        self.settings_path = Path(__file__).resolve().with_name(SETTINGS_FILE_NAME)
+        self._load_settings_from_disk(silent=True)
 
         self.status_var = tk.StringVar(value="")
         self.world = self._create_world()
         self._build_ui()
         self._bind_keys()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_ui(self) -> None:
         container = ttk.Frame(self.root, padding=8)
@@ -203,12 +215,32 @@ class PhysicsLabApp:
         self.controls_frame.bind("<MouseWheel>", self._on_controls_mousewheel)
 
         controls = self.controls_frame
+        controls.columnconfigure(1, weight=1)
 
         row = 0
+        ttk.Label(controls, text="Settings", font=("Segoe UI", 10, "bold")).grid(
+            row=row, column=0, columnspan=3, sticky="w", pady=(0, 6)
+        )
+        row += 1
+        ttk.Button(controls, text="Save Settings", command=self.save_settings).grid(
+            row=row, column=1, sticky="ew", pady=2
+        )
+        ttk.Button(controls, text="Load Settings", command=self.load_settings).grid(
+            row=row, column=2, sticky="ew", padx=(6, 0), pady=2
+        )
+        row += 1
+        ttk.Button(controls, text="Lock All", command=self.lock_all_fields).grid(
+            row=row, column=1, sticky="ew", pady=(0, 6)
+        )
+        ttk.Button(controls, text="Unlock All", command=self.unlock_all_fields).grid(
+            row=row, column=2, sticky="ew", padx=(6, 0), pady=(0, 6)
+        )
+        row += 1
+
         row = self._add_field(controls, row, "balls_per_side", "Balls Per Side")
 
         ttk.Label(controls, text="Left Ball", font=("Segoe UI", 10, "bold")).grid(
-            row=row, column=0, columnspan=2, sticky="w", pady=(0, 6)
+            row=row, column=0, columnspan=3, sticky="w", pady=(0, 6)
         )
         row += 1
         for key, label in [
@@ -222,7 +254,7 @@ class PhysicsLabApp:
         row = self._add_toggle(controls, row, "left_invincible", "Invincible")
 
         ttk.Label(controls, text="Right Ball", font=("Segoe UI", 10, "bold")).grid(
-            row=row, column=0, columnspan=2, sticky="w", pady=(10, 6)
+            row=row, column=0, columnspan=3, sticky="w", pady=(10, 6)
         )
         row += 1
         for key, label in [
@@ -236,7 +268,7 @@ class PhysicsLabApp:
         row = self._add_toggle(controls, row, "right_invincible", "Invincible")
 
         ttk.Label(controls, text="Motion / Contact", font=("Segoe UI", 10, "bold")).grid(
-            row=row, column=0, columnspan=2, sticky="w", pady=(10, 6)
+            row=row, column=0, columnspan=3, sticky="w", pady=(10, 6)
         )
         row += 1
         for key, label in [
@@ -257,7 +289,7 @@ class PhysicsLabApp:
             row = self._add_field(controls, row, key, label)
 
         ttk.Label(controls, text="Impact / Damage / Stagger", font=("Segoe UI", 10, "bold")).grid(
-            row=row, column=0, columnspan=2, sticky="w", pady=(10, 6)
+            row=row, column=0, columnspan=3, sticky="w", pady=(10, 6)
         )
         row += 1
         for key, label in [
@@ -280,23 +312,23 @@ class PhysicsLabApp:
             row = self._add_field(controls, row, key, label)
 
         ttk.Button(controls, text="Apply (No Respawn)", command=self.apply_no_respawn).grid(
-            row=row, column=0, columnspan=2, sticky="ew", pady=(10, 4)
+            row=row, column=0, columnspan=3, sticky="ew", pady=(10, 4)
         )
         row += 1
         ttk.Button(controls, text="Apply + Respawn", command=self.apply_and_respawn).grid(
-            row=row, column=0, columnspan=2, sticky="ew", pady=4
+            row=row, column=0, columnspan=3, sticky="ew", pady=4
         )
         row += 1
         ttk.Button(controls, text="Random Kick", command=self.random_kick).grid(
-            row=row, column=0, columnspan=2, sticky="ew", pady=4
+            row=row, column=0, columnspan=3, sticky="ew", pady=4
         )
         row += 1
         ttk.Button(controls, text="Pause / Resume (Space)", command=self.toggle_pause).grid(
-            row=row, column=0, columnspan=2, sticky="ew", pady=4
+            row=row, column=0, columnspan=3, sticky="ew", pady=4
         )
         row += 1
         ttk.Button(controls, text="Step 1 Tick", command=self.step_once).grid(
-            row=row, column=0, columnspan=2, sticky="ew", pady=4
+            row=row, column=0, columnspan=3, sticky="ew", pady=4
         )
         row += 1
 
@@ -306,7 +338,7 @@ class PhysicsLabApp:
             wraplength=self.controls_wraplength,
             justify="left",
         )
-        self.keys_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 6))
+        self.keys_label.grid(row=row, column=0, columnspan=3, sticky="w", pady=(10, 6))
         row += 1
         self.status_label = ttk.Label(
             controls,
@@ -314,15 +346,25 @@ class PhysicsLabApp:
             wraplength=self.controls_wraplength,
             justify="left",
         )
-        self.status_label.grid(row=row, column=0, columnspan=2, sticky="w")
+        self.status_label.grid(row=row, column=0, columnspan=3, sticky="w")
 
     def _add_field(self, parent: ttk.Frame, row: int, key: str, label: str) -> int:
         label_widget = ttk.Label(parent, text=label)
         label_widget.grid(row=row, column=0, sticky="w", padx=(0, 8), pady=2)
         entry_widget = ttk.Entry(parent, textvariable=self.vars[key], width=13)
         entry_widget.grid(row=row, column=1, sticky="ew", pady=2)
+        self.value_widgets[key] = entry_widget
+        lock_widget = ttk.Checkbutton(
+            parent,
+            text="Lock",
+            variable=self.lock_vars[key],
+            command=lambda field=key: self._on_lock_toggled(field),
+        )
+        lock_widget.grid(row=row, column=2, sticky="w", padx=(6, 0), pady=2)
         self._bind_field_help(label_widget, key)
         self._bind_field_help(entry_widget, key)
+        self._bind_field_help(lock_widget, key)
+        self._apply_widget_lock_state(key)
         return row + 1
 
     def _add_toggle(self, parent: ttk.Frame, row: int, key: str, label: str) -> int:
@@ -330,8 +372,18 @@ class PhysicsLabApp:
         label_widget.grid(row=row, column=0, sticky="w", padx=(0, 8), pady=2)
         toggle_widget = ttk.Checkbutton(parent, variable=self.vars[key])
         toggle_widget.grid(row=row, column=1, sticky="w", pady=2)
+        self.value_widgets[key] = toggle_widget
+        lock_widget = ttk.Checkbutton(
+            parent,
+            text="Lock",
+            variable=self.lock_vars[key],
+            command=lambda field=key: self._on_lock_toggled(field),
+        )
+        lock_widget.grid(row=row, column=2, sticky="w", padx=(6, 0), pady=2)
         self._bind_field_help(label_widget, key)
         self._bind_field_help(toggle_widget, key)
+        self._bind_field_help(lock_widget, key)
+        self._apply_widget_lock_state(key)
         return row + 1
 
     def _bind_field_help(self, widget: tk.Widget, key: str) -> None:
@@ -345,6 +397,134 @@ class PhysicsLabApp:
             self.tooltip.hide()
             return
         self.tooltip.show(help_text, event.x_root, event.y_root)
+
+    def _apply_widget_lock_state(self, key: str) -> None:
+        widget = self.value_widgets.get(key)
+        lock_var = self.lock_vars.get(key)
+        if widget is None or lock_var is None:
+            return
+        if lock_var.get():
+            widget.state(["disabled"])
+        else:
+            widget.state(["!disabled"])
+
+    def _on_lock_toggled(self, key: str) -> None:
+        self._apply_widget_lock_state(key)
+        self._save_settings_to_disk(silent=True)
+
+    def lock_all_fields(self) -> None:
+        for key, lock_var in self.lock_vars.items():
+            lock_var.set(True)
+            self._apply_widget_lock_state(key)
+        self.status_message = "Locked all fields."
+        self._refresh_status()
+        self._save_settings_to_disk(silent=True)
+
+    def unlock_all_fields(self) -> None:
+        for key, lock_var in self.lock_vars.items():
+            lock_var.set(False)
+            self._apply_widget_lock_state(key)
+        self.status_message = "Unlocked all fields."
+        self._refresh_status()
+        self._save_settings_to_disk(silent=True)
+
+    def _get_var_value(self, key: str) -> int | float | bool:
+        var = self.vars[key]
+        if isinstance(var, tk.BooleanVar):
+            return bool(var.get())
+        if isinstance(var, tk.IntVar):
+            return int(var.get())
+        return float(var.get())
+
+    def _set_var_value(self, key: str, value: int | float | bool) -> None:
+        var = self.vars[key]
+        if isinstance(var, tk.BooleanVar):
+            var.set(bool(value))
+            return
+        if isinstance(var, tk.IntVar):
+            var.set(int(value))
+            return
+        var.set(float(value))
+
+    def _build_settings_payload(self) -> dict[str, object]:
+        return {
+            "version": SETTINGS_VERSION,
+            "values": {key: self._get_var_value(key) for key in self.vars},
+            "locks": {key: bool(lock_var.get()) for key, lock_var in self.lock_vars.items()},
+        }
+
+    def _apply_settings_payload(self, payload: dict[str, object]) -> None:
+        raw_values = payload.get("values")
+        if isinstance(raw_values, dict):
+            for key, value in raw_values.items():
+                if key not in self.vars:
+                    continue
+                self._set_var_value(key, value)
+
+        raw_locks = payload.get("locks")
+        if isinstance(raw_locks, dict):
+            for key, value in raw_locks.items():
+                if key not in self.lock_vars:
+                    continue
+                self.lock_vars[key].set(bool(value))
+                self._apply_widget_lock_state(key)
+
+    def _save_settings_to_disk(self, *, silent: bool = False) -> bool:
+        payload = self._build_settings_payload()
+        try:
+            self.settings_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            if not silent:
+                messagebox.showerror("Save Failed", f"Could not save settings:\n{exc}")
+            return False
+        return True
+
+    def _load_settings_from_disk(self, *, silent: bool = False) -> bool:
+        if not self.settings_path.exists():
+            return False
+        try:
+            payload = json.loads(self.settings_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            if not silent:
+                messagebox.showerror("Load Failed", f"Could not load settings:\n{exc}")
+            return False
+
+        if not isinstance(payload, dict):
+            if not silent:
+                messagebox.showerror("Load Failed", "Settings file format is invalid.")
+            return False
+
+        try:
+            self._apply_settings_payload(payload)
+        except (TypeError, ValueError) as exc:
+            if not silent:
+                messagebox.showerror("Load Failed", f"Invalid settings value:\n{exc}")
+            return False
+        return True
+
+    def save_settings(self) -> None:
+        if self._save_settings_to_disk():
+            self.status_message = f"Saved settings to {self.settings_path.name}."
+            self._refresh_status()
+
+    def load_settings(self) -> None:
+        if not self._load_settings_from_disk():
+            messagebox.showinfo(
+                "No Saved Settings",
+                f"Settings file not found:\n{self.settings_path}",
+            )
+            return
+        try:
+            self.world = self._create_world()
+        except ValueError as exc:
+            messagebox.showerror("Invalid value", str(exc))
+            return
+        self.status_message = f"Loaded settings from {self.settings_path.name} and respawned."
+        self._refresh_status()
+        self._save_settings_to_disk(silent=True)
 
     def _on_canvas_resize(self, event: tk.Event) -> None:
         new_width = max(1, int(event.width))
@@ -466,6 +646,7 @@ class PhysicsLabApp:
             return
         self.status_message = "Applied tuning/invincible settings without respawn."
         self._refresh_status()
+        self._save_settings_to_disk(silent=True)
 
     def apply_and_respawn(self) -> None:
         try:
@@ -476,6 +657,7 @@ class PhysicsLabApp:
         balls_per_side = int(self.vars["balls_per_side"].get())
         self.status_message = f"Applied values and respawned {balls_per_side} balls per side."
         self._refresh_status()
+        self._save_settings_to_disk(silent=True)
 
     def random_kick(self) -> None:
         self.world.add_random_impulse(magnitude=460.0)
@@ -617,6 +799,10 @@ class PhysicsLabApp:
         self._refresh_status()
         self._tick()
         self.root.mainloop()
+
+    def _on_close(self) -> None:
+        self._save_settings_to_disk(silent=True)
+        self.root.destroy()
 
     def _tick(self) -> None:
         now = time.perf_counter()

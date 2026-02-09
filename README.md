@@ -4,7 +4,7 @@ Python prototype workspace for collision-physics visualization.
 
 ## 1) Visual Duel Physics Lab
 
-Run interactive 2-ball duel simulator:
+Run interactive multi-ball duel simulator:
 
 ```powershell
 python visual_physics_lab.py
@@ -46,6 +46,10 @@ What you can tune in real time:
 - launch height scale (multiplier for collision pop-up height)
 - damage parameters
 - stagger parameters
+- per-field lock/unlock (`Lock` checkbox on each row)
+- quick lock actions (`Lock All`, `Unlock All`)
+- save/load settings (`Save Settings`, `Load Settings`)
+- auto-persist settings on apply/close (`visual_physics_lab_settings.json`)
 
 Controls:
 - `Space`: pause/resume
