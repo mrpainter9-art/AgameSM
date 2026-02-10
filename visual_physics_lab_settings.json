@@ -15,7 +15,7 @@
     "right_speed": 210.0,
     "right_invincible": true,
     "side_margin": 1.0,
-    "gravity": 2400.0,
+    "gravity": 3000.0,
     "approach_force": 300.0,
     "restitution": 0.3,
     "wall_restitution": 0.55,
@@ -27,7 +27,7 @@
     "collision_boost": 1.0,
     "solver_passes": 3,
     "position_correction": 0.8,
-    "mass_power_impact_scale": 60.0,
+    "mass_power_impact_scale": 100.0,
     "power_ratio_exponent": 1.0,
     "impact_speed_cap": 1400.0,
     "min_recoil_speed": 45.0,
@@ -38,7 +38,7 @@
     "max_launch_speed": 820.0,
     "damage_base": 1.5,
     "damage_scale": 0.028,
-    "stagger_base": 0.06,
+    "stagger_base": 0.09,
     "stagger_scale": 0.0012,
     "max_stagger": 1.2,
     "stagger_drive_multiplier": 0.0
@@ -85,5 +85,38 @@
     "stagger_scale": false,
     "max_stagger": false,
     "stagger_drive_multiplier": false
-  }
+  },
+  "ball_specs": [
+    {
+      "team": "left",
+      "role": "dealer",
+      "radius": 24.0,
+      "mass": 0.9,
+      "power": 1.1,
+      "hp": 110.0,
+      "max_hp": 110.0,
+      "vx": 280.0,
+      "vy": 0.0,
+      "forward_dir": 1.0,
+      "color": "#4aa3ff",
+      "x": null,
+      "y": null
+    },
+    {
+      "team": "right",
+      "role": "tank",
+      "radius": 40.0,
+      "mass": 2.2,
+      "power": 1.0,
+      "hp": 220.0,
+      "max_hp": 220.0,
+      "vx": 160.0,
+      "vy": 0.0,
+      "forward_dir": 1.0,
+      "color": "#4aa3ff",
+      "x": null,
+      "y": null
+    }
+  ],
+  "ball_templates": {}
 }

@@ -503,6 +503,177 @@ class PhysicsLabTests(unittest.TestCase):
         self.assertAlmostEqual(50.0, left_a.x, places=6)
         self.assertAlmostEqual(54.0, left_b.x, places=6)
 
+    def test_dead_ball_does_not_move_or_collide(self) -> None:
+        tuning = PhysicsTuning(
+            gravity=900.0,
+            approach_force=300.0,
+            restitution=0.3,
+            wall_restitution=0.55,
+            linear_damping=0.16,
+            friction=0.2,
+            wall_friction=0.08,
+            ground_friction=0.3,
+            collision_boost=1.0,
+            solver_passes=2,
+            position_correction=0.8,
+        )
+        dead = PhysicsBody(
+            body_id=0,
+            team="left",
+            x=120.0,
+            y=70.0,
+            vx=80.0,
+            vy=-20.0,
+            radius=12.0,
+            mass=1.0,
+            color="#4aa3ff",
+            power=1.0,
+            hp=0.0,
+            max_hp=100.0,
+            forward_dir=1.0,
+        )
+        alive = PhysicsBody(
+            body_id=1,
+            team="right",
+            x=131.0,
+            y=70.0,
+            vx=-10.0,
+            vy=0.0,
+            radius=12.0,
+            mass=1.0,
+            color="#f26b5e",
+            power=1.0,
+            hp=100.0,
+            max_hp=100.0,
+            forward_dir=-1.0,
+        )
+        world = PhysicsWorld(width=400.0, height=200.0, bodies=[dead, alive], tuning=tuning)
+
+        dead_x = dead.x
+        dead_y = dead.y
+        world.step(0.02)
+
+        self.assertEqual(0, world.last_step_collisions)
+        self.assertAlmostEqual(dead_x, dead.x, places=6)
+        self.assertAlmostEqual(dead_y, dead.y, places=6)
+        self.assertEqual(0.0, dead.vx)
+        self.assertEqual(0.0, dead.vy)
+
+    def test_ranged_dealer_can_knockback_without_contact(self) -> None:
+        tuning = PhysicsTuning(
+            gravity=0.0,
+            approach_force=0.0,
+            restitution=0.0,
+            wall_restitution=1.0,
+            linear_damping=0.0,
+            friction=0.0,
+            wall_friction=0.0,
+            ground_friction=0.0,
+            ranged_attack_cooldown=0.5,
+            ranged_attack_range=300.0,
+            ranged_knockback_force=200.0,
+            ranged_damage=4.0,
+        )
+        ranged = PhysicsBody(
+            body_id=0,
+            team="left",
+            x=120.0,
+            y=80.0,
+            vx=0.0,
+            vy=0.0,
+            radius=12.0,
+            mass=1.0,
+            color="#4aa3ff",
+            power=1.0,
+            role="ranged_dealer",
+            forward_dir=1.0,
+        )
+        target = PhysicsBody(
+            body_id=1,
+            team="right",
+            x=260.0,
+            y=80.0,
+            vx=0.0,
+            vy=0.0,
+            radius=12.0,
+            mass=1.0,
+            color="#f26b5e",
+            power=1.0,
+            role="dealer",
+            forward_dir=-1.0,
+        )
+        world = PhysicsWorld(width=600.0, height=200.0, bodies=[ranged, target], tuning=tuning)
+
+        world.step(0.02)
+
+        self.assertGreater(target.vx, 0.0)
+        self.assertLess(target.hp, target.max_hp)
+
+    def test_healer_restores_ally_hp(self) -> None:
+        tuning = PhysicsTuning(
+            gravity=0.0,
+            approach_force=0.0,
+            restitution=0.0,
+            wall_restitution=1.0,
+            linear_damping=0.0,
+            friction=0.0,
+            wall_friction=0.0,
+            ground_friction=0.0,
+            healer_cooldown=0.5,
+            healer_range=240.0,
+            healer_amount=12.0,
+        )
+        healer = PhysicsBody(
+            body_id=0,
+            team="left",
+            x=100.0,
+            y=70.0,
+            vx=0.0,
+            vy=0.0,
+            radius=10.0,
+            mass=1.0,
+            color="#4aa3ff",
+            power=1.0,
+            role="healer",
+            forward_dir=1.0,
+        )
+        ally = PhysicsBody(
+            body_id=1,
+            team="left",
+            x=180.0,
+            y=70.0,
+            vx=0.0,
+            vy=0.0,
+            radius=10.0,
+            mass=1.0,
+            color="#4aa3ff",
+            power=1.0,
+            role="dealer",
+            max_hp=120.0,
+            hp=80.0,
+            forward_dir=1.0,
+        )
+        enemy = PhysicsBody(
+            body_id=2,
+            team="right",
+            x=420.0,
+            y=70.0,
+            vx=0.0,
+            vy=0.0,
+            radius=10.0,
+            mass=1.0,
+            color="#f26b5e",
+            power=1.0,
+            role="dealer",
+            forward_dir=-1.0,
+        )
+        world = PhysicsWorld(width=640.0, height=200.0, bodies=[healer, ally, enemy], tuning=tuning)
+
+        hp_before = ally.hp
+        world.step(0.02)
+
+        self.assertGreater(ally.hp, hp_before)
+
 
 if __name__ == "__main__":
     unittest.main()

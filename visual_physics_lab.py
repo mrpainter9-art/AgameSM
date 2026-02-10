@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from autochess_combat import PhysicsTuning, create_duel_world
+from autochess_combat import PhysicsTuning
+from autochess_combat.battle_sim import (
+    run_random_profile_sweep_from_settings_payload,
+    run_profile_sweep_from_settings_payload,
+    sweep_result_to_html,
+    sweep_result_to_json_dict,
+    sweep_result_to_markdown,
+)
 from autochess_combat.physics_lab import PhysicsBody, PhysicsWorld
 
 
@@ -59,6 +68,47 @@ FIELD_HELP_KO: dict[str, str] = {
 
 SETTINGS_FILE_NAME = "visual_physics_lab_settings.json"
 SETTINGS_VERSION = 1
+CUSTOM_BALLS_TEMPLATE: dict[str, object] = {
+    "invincible_teams": [],
+    "balls": [
+        {
+            "team": "left",
+            "role": "tank",
+            "radius": 24,
+            "mass": 0.9,
+            "power": 1.1,
+            "hp": 110,
+            "vx": 280,
+        },
+        {
+            "team": "left",
+            "role": "ranged_healer",
+            "radius": 36,
+            "mass": 1.8,
+            "power": 1.6,
+            "hp": 160,
+            "vx": 180,
+        },
+        {
+            "team": "right",
+            "role": "dealer",
+            "radius": 30,
+            "mass": 1.3,
+            "power": 1.7,
+            "hp": 120,
+            "vx": -240,
+        },
+        {
+            "team": "right",
+            "role": "ranged_dealer",
+            "radius": 42,
+            "mass": 2.4,
+            "power": 2.2,
+            "hp": 210,
+            "vx": -140,
+        },
+    ],
+}
 
 
 class HoverTooltip:
@@ -167,11 +217,39 @@ class PhysicsLabApp:
             key: tk.BooleanVar(value=False) for key in self.vars
         }
         self.value_widgets: dict[str, tk.Widget] = {}
+        self.custom_data_text_widget: tk.Text | None = None
+        self.custom_data_text = json.dumps(CUSTOM_BALLS_TEMPLATE, indent=2)
+        self.ball_specs: list[dict[str, object]] = []
+        self.ball_templates: dict[str, dict[str, object]] = {}
+        self.ball_tree: ttk.Treeview | None = None
+        self.ball_tree_editor: tk.Widget | None = None
+        self.ball_tree_editor_item: str | None = None
+        self.ball_tree_editor_column: str | None = None
+        self.template_listbox: tk.Listbox | None = None
+        self.ball_editor_vars: dict[str, tk.Variable] = {
+            "team": tk.StringVar(value="left"),
+            "role": tk.StringVar(value="dealer"),
+            "radius": tk.DoubleVar(value=32.0),
+            "mass": tk.DoubleVar(value=1.0),
+            "power": tk.DoubleVar(value=1.0),
+            "hp": tk.DoubleVar(value=100.0),
+            "max_hp": tk.DoubleVar(value=100.0),
+            "vx": tk.DoubleVar(value=260.0),
+            "vy": tk.DoubleVar(value=0.0),
+            "forward_dir": tk.DoubleVar(value=1.0),
+            "color": tk.StringVar(value="#4aa3ff"),
+            "x": tk.StringVar(value=""),
+            "y": tk.StringVar(value=""),
+        }
+        self.template_name_var = tk.StringVar(value="")
+        self.ball_specs = self._default_ball_specs()
         self.settings_path = Path(__file__).resolve().with_name(SETTINGS_FILE_NAME)
         self._load_settings_from_disk(silent=True)
 
         self.status_var = tk.StringVar(value="")
         self.world = self._create_world()
+        self.battle_over = False
+        self.battle_report_text = ""
         self._build_ui()
         self._bind_keys()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -180,7 +258,9 @@ class PhysicsLabApp:
         container = ttk.Frame(self.root, padding=8)
         container.pack(fill="both", expand=True)
         container.columnconfigure(0, weight=1)
+        container.columnconfigure(1, weight=0)
         container.rowconfigure(0, weight=1)
+        container.rowconfigure(1, weight=0)
 
         self.canvas = tk.Canvas(
             container,
@@ -191,6 +271,7 @@ class PhysicsLabApp:
         )
         self.canvas.grid(row=0, column=0, sticky="nsew")
         self.canvas.bind("<Configure>", self._on_canvas_resize)
+        self.canvas.bind("<Button-1>", self._on_canvas_click)
 
         controls_outer = ttk.Frame(container, padding=(12, 4, 0, 4))
         controls_outer.grid(row=0, column=1, sticky="ns")
@@ -215,63 +296,219 @@ class PhysicsLabApp:
         self.controls_frame.bind("<MouseWheel>", self._on_controls_mousewheel)
 
         controls = self.controls_frame
+        controls.columnconfigure(0, weight=1)
         controls.columnconfigure(1, weight=1)
 
         row = 0
-        ttk.Label(controls, text="Settings", font=("Segoe UI", 10, "bold")).grid(
-            row=row, column=0, columnspan=3, sticky="w", pady=(0, 6)
+        ttk.Label(controls, text="Simulation", font=("Segoe UI", 10, "bold")).grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(0, 6)
         )
         row += 1
         ttk.Button(controls, text="Save Settings", command=self.save_settings).grid(
-            row=row, column=1, sticky="ew", pady=2
+            row=row, column=0, sticky="ew", pady=2
         )
         ttk.Button(controls, text="Load Settings", command=self.load_settings).grid(
-            row=row, column=2, sticky="ew", padx=(6, 0), pady=2
+            row=row, column=1, sticky="ew", padx=(6, 0), pady=2
         )
         row += 1
-        ttk.Button(controls, text="Lock All", command=self.lock_all_fields).grid(
-            row=row, column=1, sticky="ew", pady=(0, 6)
+        ttk.Button(controls, text="Run Battle Feel Report", command=self.run_battle_feel_report).grid(
+            row=row, column=0, columnspan=2, sticky="ew", pady=(0, 4)
         )
-        ttk.Button(controls, text="Unlock All", command=self.unlock_all_fields).grid(
-            row=row, column=2, sticky="ew", padx=(6, 0), pady=(0, 6)
+        row += 1
+        ttk.Button(
+            controls,
+            text="Run Random Battle Report",
+            command=self.run_random_battle_feel_report,
+        ).grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+        row += 1
+
+        ttk.Label(controls, text="Balls", font=("Segoe UI", 10, "bold")).grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(10, 6)
+        )
+        row += 1
+        ball_list_frame = ttk.Frame(controls)
+        ball_list_frame.grid(row=row, column=0, columnspan=2, sticky="ew")
+        ball_list_frame.columnconfigure(0, weight=1)
+        self.ball_tree = ttk.Treeview(
+            ball_list_frame,
+            columns=("idx", "team", "role", "hp", "max_hp", "power", "radius", "mass", "vx"),
+            show="headings",
+            height=8,
+        )
+        self.ball_tree.heading("idx", text="#")
+        self.ball_tree.heading("team", text="Team")
+        self.ball_tree.heading("role", text="Class")
+        self.ball_tree.heading("hp", text="HP")
+        self.ball_tree.heading("max_hp", text="Max")
+        self.ball_tree.heading("power", text="Power")
+        self.ball_tree.heading("radius", text="R")
+        self.ball_tree.heading("mass", text="M")
+        self.ball_tree.heading("vx", text="Vx")
+        self.ball_tree.column("idx", width=34, anchor="center")
+        self.ball_tree.column("team", width=50, anchor="center")
+        self.ball_tree.column("role", width=98, anchor="center")
+        self.ball_tree.column("hp", width=50, anchor="center")
+        self.ball_tree.column("max_hp", width=50, anchor="center")
+        self.ball_tree.column("power", width=54, anchor="center")
+        self.ball_tree.column("radius", width=42, anchor="center")
+        self.ball_tree.column("mass", width=42, anchor="center")
+        self.ball_tree.column("vx", width=52, anchor="center")
+        self.ball_tree.grid(row=0, column=0, sticky="ew")
+        ball_scroll = ttk.Scrollbar(ball_list_frame, orient="vertical", command=self.ball_tree.yview)
+        ball_scroll.grid(row=0, column=1, sticky="ns")
+        self.ball_tree.configure(yscrollcommand=ball_scroll.set)
+        self.ball_tree.bind("<<TreeviewSelect>>", self._on_ball_tree_select)
+        self.ball_tree.bind("<Double-1>", self._on_ball_tree_double_click)
+        row += 1
+        ttk.Label(
+            controls,
+            text="Tip: double-click a cell in Balls list to edit directly.",
+            justify="left",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        row += 1
+
+        ttk.Button(controls, text="Add Ball", command=self.add_ball_from_editor).grid(
+            row=row, column=0, sticky="ew", pady=(4, 2)
+        )
+        ttk.Button(controls, text="Update Selected", command=self.update_selected_ball).grid(
+            row=row, column=1, sticky="ew", padx=(6, 0), pady=(4, 2)
+        )
+        row += 1
+        ttk.Button(controls, text="Duplicate", command=self.duplicate_selected_ball).grid(
+            row=row, column=0, sticky="ew", pady=(0, 6)
+        )
+        ttk.Button(controls, text="Remove", command=self.remove_selected_ball).grid(
+            row=row, column=1, sticky="ew", padx=(6, 0), pady=(0, 6)
         )
         row += 1
 
-        row = self._add_field(controls, row, "balls_per_side", "Balls Per Side")
+        editor = ttk.LabelFrame(controls, text="Ball Editor", padding=(8, 6))
+        editor.grid(row=row, column=0, columnspan=2, sticky="ew")
+        editor.columnconfigure(1, weight=1)
+        editor.columnconfigure(3, weight=1)
+        erow = 0
 
-        ttk.Label(controls, text="Left Ball", font=("Segoe UI", 10, "bold")).grid(
-            row=row, column=0, columnspan=3, sticky="w", pady=(0, 6)
+        ttk.Label(editor, text="Team").grid(row=erow, column=0, sticky="w", pady=2)
+        ttk.Combobox(
+            editor,
+            values=("left", "right"),
+            state="readonly",
+            textvariable=self.ball_editor_vars["team"],
+            width=8,
+        ).grid(row=erow, column=1, sticky="ew", pady=2, padx=(0, 8))
+        ttk.Label(editor, text="Class").grid(row=erow, column=2, sticky="w", pady=2)
+        ttk.Combobox(
+            editor,
+            values=self._role_options(),
+            state="readonly",
+            textvariable=self.ball_editor_vars["role"],
+            width=14,
+        ).grid(row=erow, column=3, sticky="ew", pady=2)
+        erow += 1
+        ttk.Label(editor, text="Color").grid(row=erow, column=0, sticky="w", pady=2)
+        ttk.Entry(editor, textvariable=self.ball_editor_vars["color"], width=10).grid(
+            row=erow, column=1, sticky="ew", pady=2, padx=(0, 8)
         )
-        row += 1
-        for key, label in [
-            ("left_radius", "Radius"),
-            ("left_mass", "Mass"),
-            ("left_power", "Power"),
-            ("left_hp", "HP"),
-            ("left_speed", "Initial Speed"),
+        ttk.Label(editor, text="Preset").grid(row=erow, column=2, sticky="w", pady=2)
+        preset_row = ttk.Frame(editor)
+        preset_row.grid(row=erow, column=3, sticky="ew", pady=2)
+        for p in ("tank", "dealer", "healer", "ranged_dealer", "ranged_healer"):
+            ttk.Button(
+                preset_row,
+                text=p,
+                command=lambda name=p: self.apply_class_preset(name),
+                width=9,
+            ).pack(side="left", padx=(0, 2))
+        erow += 1
+
+        for left_key, left_label, right_key, right_label in [
+            ("radius", "Radius", "mass", "Mass"),
+            ("power", "Power", "hp", "HP"),
+            ("max_hp", "Max HP", "vx", "Vx"),
+            ("vy", "Vy", "forward_dir", "Forward"),
+            ("x", "X (opt)", "y", "Y (opt)"),
         ]:
-            row = self._add_field(controls, row, key, label)
-        row = self._add_toggle(controls, row, "left_invincible", "Invincible")
+            ttk.Label(editor, text=left_label).grid(row=erow, column=0, sticky="w", pady=2)
+            ttk.Entry(editor, textvariable=self.ball_editor_vars[left_key], width=10).grid(
+                row=erow, column=1, sticky="ew", pady=2, padx=(0, 8)
+            )
+            ttk.Label(editor, text=right_label).grid(row=erow, column=2, sticky="w", pady=2)
+            ttk.Entry(editor, textvariable=self.ball_editor_vars[right_key], width=10).grid(
+                row=erow, column=3, sticky="ew", pady=2
+            )
+            erow += 1
+        row += 1
 
-        ttk.Label(controls, text="Right Ball", font=("Segoe UI", 10, "bold")).grid(
-            row=row, column=0, columnspan=3, sticky="w", pady=(10, 6)
+        templates = ttk.LabelFrame(controls, text="Templates", padding=(8, 6))
+        templates.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        templates.columnconfigure(1, weight=1)
+        ttk.Label(templates, text="Name").grid(row=0, column=0, sticky="w", pady=2)
+        ttk.Entry(templates, textvariable=self.template_name_var).grid(
+            row=0, column=1, sticky="ew", pady=2
+        )
+        self.template_listbox = tk.Listbox(templates, height=5, exportselection=False)
+        self.template_listbox.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 6))
+        self.template_listbox.bind("<<ListboxSelect>>", self._on_template_selected)
+        ttk.Button(templates, text="Save Template", command=self.save_ball_template).grid(
+            row=2, column=0, sticky="ew", pady=2
+        )
+        ttk.Button(templates, text="Delete Template", command=self.delete_ball_template).grid(
+            row=2, column=1, sticky="ew", pady=2, padx=(6, 0)
+        )
+        ttk.Button(templates, text="Apply to Selected Ball", command=self.apply_template_to_selected).grid(
+            row=3, column=0, sticky="ew", pady=2
+        )
+        ttk.Button(templates, text="Apply to All Balls", command=self.apply_template_to_all).grid(
+            row=3, column=1, sticky="ew", pady=2, padx=(6, 0)
         )
         row += 1
-        for key, label in [
-            ("right_radius", "Radius"),
-            ("right_mass", "Mass"),
-            ("right_power", "Power"),
-            ("right_hp", "HP"),
-            ("right_speed", "Initial Speed"),
-        ]:
-            row = self._add_field(controls, row, key, label)
-        row = self._add_toggle(controls, row, "right_invincible", "Invincible")
 
-        ttk.Label(controls, text="Motion / Contact", font=("Segoe UI", 10, "bold")).grid(
-            row=row, column=0, columnspan=3, sticky="w", pady=(10, 6)
+        ttk.Button(controls, text="Apply Physics Only", command=self.apply_no_respawn).grid(
+            row=row, column=0, columnspan=2, sticky="ew", pady=(10, 4)
         )
         row += 1
-        for key, label in [
+        ttk.Button(controls, text="Respawn Balls", command=self.apply_and_respawn).grid(
+            row=row, column=0, columnspan=2, sticky="ew", pady=4
+        )
+        row += 1
+        ttk.Button(controls, text="Random Kick", command=self.random_kick).grid(
+            row=row, column=0, columnspan=2, sticky="ew", pady=4
+        )
+        row += 1
+        ttk.Button(controls, text="Pause / Resume (Space)", command=self.toggle_pause).grid(
+            row=row, column=0, columnspan=2, sticky="ew", pady=4
+        )
+        row += 1
+        ttk.Button(controls, text="Step 1 Tick", command=self.step_once).grid(
+            row=row, column=0, columnspan=2, sticky="ew", pady=4
+        )
+        row += 1
+
+        self.keys_label = ttk.Label(
+            controls,
+            text="Keys: Space pause, R/Enter respawn, K kick, B report, N random report",
+            wraplength=self.controls_wraplength,
+            justify="left",
+        )
+        self.keys_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 6))
+        row += 1
+        self.status_label = ttk.Label(
+            controls,
+            textvariable=self.status_var,
+            wraplength=self.controls_wraplength,
+            justify="left",
+        )
+        self.status_label.grid(row=row, column=0, columnspan=2, sticky="w")
+
+        env_outer = ttk.LabelFrame(container, text="Environment / Physics", padding=(10, 8))
+        env_outer.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self._build_environment_panel(env_outer)
+
+        self._refresh_ball_tree()
+        self._refresh_template_list()
+
+    def _build_environment_panel(self, parent: ttk.LabelFrame) -> None:
+        fields = [
             ("side_margin", "Side Margin"),
             ("gravity", "Gravity"),
             ("approach_force", "Approach Force"),
@@ -285,16 +522,8 @@ class PhysicsLabApp:
             ("collision_boost", "Collision Boost"),
             ("solver_passes", "Solver Passes"),
             ("position_correction", "Position Correction"),
-        ]:
-            row = self._add_field(controls, row, key, label)
-
-        ttk.Label(controls, text="Impact / Damage / Stagger", font=("Segoe UI", 10, "bold")).grid(
-            row=row, column=0, columnspan=3, sticky="w", pady=(10, 6)
-        )
-        row += 1
-        for key, label in [
-            ("power_ratio_exponent", "Power Ratio Exp"),
             ("mass_power_impact_scale", "Mass+Power Scale"),
+            ("power_ratio_exponent", "Power Ratio Exp"),
             ("impact_speed_cap", "Impact Speed Cap"),
             ("min_recoil_speed", "Min Recoil Speed"),
             ("recoil_scale", "Recoil Scale"),
@@ -308,45 +537,569 @@ class PhysicsLabApp:
             ("stagger_scale", "Stagger Scale"),
             ("max_stagger", "Max Stagger"),
             ("stagger_drive_multiplier", "Stagger Drive Mult"),
-        ]:
-            row = self._add_field(controls, row, key, label)
+        ]
+        pairs_per_row = 4
+        for col in range(pairs_per_row * 2):
+            if col % 2 == 1:
+                parent.columnconfigure(col, weight=1)
 
-        ttk.Button(controls, text="Apply (No Respawn)", command=self.apply_no_respawn).grid(
-            row=row, column=0, columnspan=3, sticky="ew", pady=(10, 4)
-        )
-        row += 1
-        ttk.Button(controls, text="Apply + Respawn", command=self.apply_and_respawn).grid(
-            row=row, column=0, columnspan=3, sticky="ew", pady=4
-        )
-        row += 1
-        ttk.Button(controls, text="Random Kick", command=self.random_kick).grid(
-            row=row, column=0, columnspan=3, sticky="ew", pady=4
-        )
-        row += 1
-        ttk.Button(controls, text="Pause / Resume (Space)", command=self.toggle_pause).grid(
-            row=row, column=0, columnspan=3, sticky="ew", pady=4
-        )
-        row += 1
-        ttk.Button(controls, text="Step 1 Tick", command=self.step_once).grid(
-            row=row, column=0, columnspan=3, sticky="ew", pady=4
-        )
-        row += 1
+        for idx, (key, label) in enumerate(fields):
+            row = idx // pairs_per_row
+            col = (idx % pairs_per_row) * 2
+            label_widget = ttk.Label(parent, text=label)
+            label_widget.grid(row=row, column=col, sticky="w", padx=(0, 6), pady=2)
+            entry_widget = ttk.Entry(parent, textvariable=self.vars[key], width=10)
+            entry_widget.grid(row=row, column=col + 1, sticky="ew", padx=(0, 10), pady=2)
+            self.value_widgets[key] = entry_widget
+            self._bind_field_help(label_widget, key)
+            self._bind_field_help(entry_widget, key)
+            self._apply_widget_lock_state(key)
 
-        self.keys_label = ttk.Label(
-            controls,
-            text="Keys: Space pause, R respawn, K random kick, Enter apply+respawn",
-            wraplength=self.controls_wraplength,
-            justify="left",
+    def _default_ball_specs(self) -> list[dict[str, object]]:
+        default_balls: list[dict[str, object]] = []
+        raw = CUSTOM_BALLS_TEMPLATE.get("balls", [])
+        if isinstance(raw, list):
+            for idx, item in enumerate(raw):
+                if isinstance(item, dict):
+                    default_balls.append(self._normalize_ball_spec(item, idx))
+        return default_balls
+
+    def _team_default_color(self, team: str) -> str:
+        if team == "left":
+            return "#4aa3ff"
+        if team == "right":
+            return "#f26b5e"
+        return "#dce6f2"
+
+    def _role_options(self) -> tuple[str, ...]:
+        return ("tank", "dealer", "healer", "ranged_dealer", "ranged_healer")
+
+    def _normalize_role(self, raw: object) -> str:
+        role = str(raw).strip().lower()
+        if role not in self._role_options():
+            return "dealer"
+        return role
+
+    def _class_preset_payload(self, preset: str) -> dict[str, object] | None:
+        mapping: dict[str, dict[str, object]] = {
+            "tank": {
+                "role": "tank",
+                "radius": 40.0,
+                "mass": 2.2,
+                "power": 1.0,
+                "hp": 220.0,
+                "max_hp": 220.0,
+                "vx": 160.0,
+            },
+            "dealer": {
+                "role": "dealer",
+                "radius": 28.0,
+                "mass": 1.0,
+                "power": 1.55,
+                "hp": 120.0,
+                "max_hp": 120.0,
+                "vx": 250.0,
+            },
+            "healer": {
+                "role": "healer",
+                "radius": 30.0,
+                "mass": 1.1,
+                "power": 0.95,
+                "hp": 140.0,
+                "max_hp": 140.0,
+                "vx": 210.0,
+            },
+            "ranged_dealer": {
+                "role": "ranged_dealer",
+                "radius": 24.0,
+                "mass": 0.85,
+                "power": 1.45,
+                "hp": 100.0,
+                "max_hp": 100.0,
+                "vx": 230.0,
+            },
+            "ranged_healer": {
+                "role": "ranged_healer",
+                "radius": 26.0,
+                "mass": 0.9,
+                "power": 1.05,
+                "hp": 120.0,
+                "max_hp": 120.0,
+                "vx": 220.0,
+            },
+        }
+        return mapping.get(preset)
+
+    def apply_class_preset(self, preset: str) -> None:
+        payload = self._class_preset_payload(preset)
+        if payload is None:
+            return
+        for key, value in payload.items():
+            if key in self.ball_editor_vars:
+                self.ball_editor_vars[key].set(value)
+        team = str(self.ball_editor_vars["team"].get()).strip().lower()
+        if team == "right":
+            vx = abs(float(self.ball_editor_vars["vx"].get()))
+            self.ball_editor_vars["vx"].set(-vx)
+            self.ball_editor_vars["forward_dir"].set(-1.0)
+        else:
+            vx = abs(float(self.ball_editor_vars["vx"].get()))
+            self.ball_editor_vars["vx"].set(vx)
+            self.ball_editor_vars["forward_dir"].set(1.0)
+
+    def _optional_float(self, value: object) -> float | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if text == "":
+            return None
+        return float(text)
+
+    def _normalize_ball_spec(self, raw: dict[str, object], idx: int) -> dict[str, object]:
+        team = str(raw.get("team", "left")).strip().lower() or "left"
+        role = self._normalize_role(raw.get("role", "dealer"))
+        radius = float(raw.get("radius", 32.0))
+        mass = float(raw.get("mass", 1.0))
+        power = float(raw.get("power", 1.0))
+        hp = float(raw.get("hp", 100.0))
+        max_hp = float(raw.get("max_hp", hp))
+        if radius <= 0:
+            raise ValueError(f"`balls[{idx}].radius` must be > 0.")
+        if mass <= 0:
+            raise ValueError(f"`balls[{idx}].mass` must be > 0.")
+        if power <= 0:
+            raise ValueError(f"`balls[{idx}].power` must be > 0.")
+        if max_hp <= 0:
+            raise ValueError(f"`balls[{idx}].max_hp` must be > 0.")
+        if hp < 0:
+            raise ValueError(f"`balls[{idx}].hp` must be >= 0.")
+        hp = min(hp, max_hp)
+        if "vx" in raw:
+            vx = float(raw.get("vx", 0.0))
+        elif team == "left":
+            vx = abs(float(self.vars["left_speed"].get()))
+        elif team == "right":
+            vx = -abs(float(self.vars["right_speed"].get()))
+        else:
+            vx = 0.0
+        vy = float(raw.get("vy", 0.0))
+        default_forward = 1.0 if team == "left" else (-1.0 if team == "right" else 0.0)
+        forward_dir = float(raw.get("forward_dir", default_forward))
+        color = str(raw.get("color", self._team_default_color(team)))
+        x = self._optional_float(raw.get("x"))
+        y = self._optional_float(raw.get("y"))
+        return {
+            "team": team,
+            "role": role,
+            "radius": radius,
+            "mass": mass,
+            "power": power,
+            "hp": hp,
+            "max_hp": max_hp,
+            "vx": vx,
+            "vy": vy,
+            "forward_dir": forward_dir,
+            "color": color,
+            "x": x,
+            "y": y,
+        }
+
+    def _selected_ball_index(self) -> int | None:
+        if self.ball_tree is None:
+            return None
+        selected = self.ball_tree.selection()
+        if not selected:
+            return None
+        try:
+            return int(selected[0])
+        except ValueError:
+            return None
+
+    def _refresh_ball_tree(self, *, select_index: int | None = None) -> None:
+        if self.ball_tree is None:
+            return
+        self._destroy_ball_tree_editor()
+        if select_index is None:
+            select_index = self._selected_ball_index()
+
+        for item in self.ball_tree.get_children():
+            self.ball_tree.delete(item)
+
+        for idx, spec in enumerate(self.ball_specs):
+            hp = float(spec["hp"])
+            max_hp = float(spec["max_hp"])
+            self.ball_tree.insert(
+                "",
+                "end",
+                iid=str(idx),
+                values=(
+                    idx + 1,
+                    str(spec["team"]),
+                    str(spec.get("role", "dealer")),
+                    f"{hp:.0f}",
+                    f"{max_hp:.0f}",
+                    f"{float(spec['power']):.2f}",
+                    f"{float(spec['radius']):.0f}",
+                    f"{float(spec['mass']):.1f}",
+                    f"{float(spec['vx']):.0f}",
+                ),
+            )
+
+        if not self.ball_specs:
+            return
+        if select_index is None:
+            select_index = 0
+        select_index = min(max(0, select_index), len(self.ball_specs) - 1)
+        self.ball_tree.selection_set(str(select_index))
+        self.ball_tree.focus(str(select_index))
+        self._load_editor_from_spec(self.ball_specs[select_index])
+
+    def _on_ball_tree_select(self, _: tk.Event) -> None:
+        idx = self._selected_ball_index()
+        if idx is None or idx >= len(self.ball_specs):
+            return
+        self._load_editor_from_spec(self.ball_specs[idx])
+
+    def _destroy_ball_tree_editor(self) -> None:
+        if self.ball_tree_editor is not None:
+            self.ball_tree_editor.destroy()
+            self.ball_tree_editor = None
+        self.ball_tree_editor_item = None
+        self.ball_tree_editor_column = None
+
+    def _on_ball_tree_double_click(self, event: tk.Event) -> None:
+        if self.ball_tree is None:
+            return
+        item = self.ball_tree.identify_row(event.y)
+        column = self.ball_tree.identify_column(event.x)
+        if not item or not column:
+            return
+        if column == "#1":
+            return
+        idx = int(item)
+        if idx < 0 or idx >= len(self.ball_specs):
+            return
+
+        bbox = self.ball_tree.bbox(item, column)
+        if not bbox:
+            return
+        x, y, width, height = bbox
+        values = self.ball_tree.item(item, "values")
+        col_index = int(column[1:]) - 1
+        if col_index < 0 or col_index >= len(values):
+            return
+        current_text = str(values[col_index])
+
+        self._destroy_ball_tree_editor()
+        if column == "#2":
+            editor = ttk.Combobox(
+                self.ball_tree,
+                values=("left", "right"),
+                state="readonly",
+            )
+            editor.set(current_text)
+        elif column == "#3":
+            editor = ttk.Combobox(
+                self.ball_tree,
+                values=self._role_options(),
+                state="readonly",
+            )
+            editor.set(current_text)
+        else:
+            editor = ttk.Entry(self.ball_tree)
+            editor.insert(0, current_text)
+            editor.selection_range(0, "end")
+
+        editor.place(x=x, y=y, width=width, height=height)
+        editor.focus_set()
+        editor.bind("<Return>", lambda _: self._commit_ball_tree_edit())
+        editor.bind("<Escape>", lambda _: self._destroy_ball_tree_editor())
+        editor.bind("<FocusOut>", lambda _: self._commit_ball_tree_edit())
+        self.ball_tree_editor = editor
+        self.ball_tree_editor_item = item
+        self.ball_tree_editor_column = column
+
+    def _commit_ball_tree_edit(self) -> None:
+        if (
+            self.ball_tree is None
+            or self.ball_tree_editor is None
+            or self.ball_tree_editor_item is None
+            or self.ball_tree_editor_column is None
+        ):
+            return
+
+        item = self.ball_tree_editor_item
+        column = self.ball_tree_editor_column
+        idx = int(item)
+        if idx < 0 or idx >= len(self.ball_specs):
+            self._destroy_ball_tree_editor()
+            return
+
+        if isinstance(self.ball_tree_editor, ttk.Combobox):
+            raw_value = self.ball_tree_editor.get().strip().lower()
+        elif isinstance(self.ball_tree_editor, ttk.Entry):
+            raw_value = self.ball_tree_editor.get().strip()
+        else:
+            self._destroy_ball_tree_editor()
+            return
+
+        updated = dict(self.ball_specs[idx])
+        try:
+            if column == "#2":
+                if raw_value not in ("left", "right"):
+                    raise ValueError("Team must be left or right.")
+                updated["team"] = raw_value
+                if str(updated.get("color", "")).strip() == "":
+                    updated["color"] = self._team_default_color(raw_value)
+            elif column == "#3":
+                updated["role"] = self._normalize_role(raw_value)
+            elif column == "#4":
+                updated["hp"] = float(raw_value)
+            elif column == "#5":
+                updated["max_hp"] = float(raw_value)
+            elif column == "#6":
+                updated["power"] = float(raw_value)
+            elif column == "#7":
+                updated["radius"] = float(raw_value)
+            elif column == "#8":
+                updated["mass"] = float(raw_value)
+            elif column == "#9":
+                updated["vx"] = float(raw_value)
+            else:
+                self._destroy_ball_tree_editor()
+                return
+
+            normalized = self._normalize_ball_spec(updated, idx)
+        except (TypeError, ValueError) as exc:
+            self._destroy_ball_tree_editor()
+            messagebox.showerror("Ball List Edit Error", str(exc))
+            return
+
+        self.ball_specs[idx] = normalized
+        self._destroy_ball_tree_editor()
+        self._refresh_ball_tree(select_index=idx)
+        self.status_message = f"Updated ball #{idx + 1} from list."
+        self._refresh_status()
+        self._save_settings_to_disk(silent=True)
+
+    def _load_editor_from_spec(self, spec: dict[str, object]) -> None:
+        self.ball_editor_vars["team"].set(str(spec["team"]))
+        self.ball_editor_vars["role"].set(self._normalize_role(spec.get("role", "dealer")))
+        self.ball_editor_vars["radius"].set(float(spec["radius"]))
+        self.ball_editor_vars["mass"].set(float(spec["mass"]))
+        self.ball_editor_vars["power"].set(float(spec["power"]))
+        self.ball_editor_vars["hp"].set(float(spec["hp"]))
+        self.ball_editor_vars["max_hp"].set(float(spec["max_hp"]))
+        self.ball_editor_vars["vx"].set(float(spec["vx"]))
+        self.ball_editor_vars["vy"].set(float(spec["vy"]))
+        self.ball_editor_vars["forward_dir"].set(float(spec["forward_dir"]))
+        self.ball_editor_vars["color"].set(str(spec["color"]))
+        x = spec.get("x")
+        y = spec.get("y")
+        self.ball_editor_vars["x"].set("" if x is None else f"{float(x):.1f}")
+        self.ball_editor_vars["y"].set("" if y is None else f"{float(y):.1f}")
+
+    def _ball_spec_from_editor(self) -> dict[str, object]:
+        raw: dict[str, object] = {
+            "team": str(self.ball_editor_vars["team"].get()),
+            "role": str(self.ball_editor_vars["role"].get()),
+            "radius": self.ball_editor_vars["radius"].get(),
+            "mass": self.ball_editor_vars["mass"].get(),
+            "power": self.ball_editor_vars["power"].get(),
+            "hp": self.ball_editor_vars["hp"].get(),
+            "max_hp": self.ball_editor_vars["max_hp"].get(),
+            "vx": self.ball_editor_vars["vx"].get(),
+            "vy": self.ball_editor_vars["vy"].get(),
+            "forward_dir": self.ball_editor_vars["forward_dir"].get(),
+            "color": str(self.ball_editor_vars["color"].get()),
+            "x": str(self.ball_editor_vars["x"].get()).strip(),
+            "y": str(self.ball_editor_vars["y"].get()).strip(),
+        }
+        try:
+            return self._normalize_ball_spec(raw, 0)
+        except (tk.TclError, TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid ball editor value: {exc}") from exc
+
+    def add_ball_from_editor(self) -> None:
+        try:
+            spec = self._ball_spec_from_editor()
+        except ValueError as exc:
+            messagebox.showerror("Ball Editor Error", str(exc))
+            return
+        self.ball_specs.append(spec)
+        self._refresh_ball_tree(select_index=len(self.ball_specs) - 1)
+        self.status_message = f"Added ball #{len(self.ball_specs)}."
+        self._refresh_status()
+        self._save_settings_to_disk(silent=True)
+
+    def update_selected_ball(self) -> None:
+        idx = self._selected_ball_index()
+        if idx is None or idx >= len(self.ball_specs):
+            messagebox.showinfo("Select Ball", "Select a ball row to update.")
+            return
+        try:
+            spec = self._ball_spec_from_editor()
+        except ValueError as exc:
+            messagebox.showerror("Ball Editor Error", str(exc))
+            return
+        self.ball_specs[idx] = spec
+        self._refresh_ball_tree(select_index=idx)
+        self.status_message = f"Updated ball #{idx + 1}."
+        self._refresh_status()
+        self._save_settings_to_disk(silent=True)
+
+    def duplicate_selected_ball(self) -> None:
+        idx = self._selected_ball_index()
+        if idx is None or idx >= len(self.ball_specs):
+            messagebox.showinfo("Select Ball", "Select a ball row to duplicate.")
+            return
+        clone = dict(self.ball_specs[idx])
+        self.ball_specs.insert(idx + 1, clone)
+        self._refresh_ball_tree(select_index=idx + 1)
+        self.status_message = f"Duplicated ball #{idx + 1}."
+        self._refresh_status()
+        self._save_settings_to_disk(silent=True)
+
+    def remove_selected_ball(self) -> None:
+        idx = self._selected_ball_index()
+        if idx is None or idx >= len(self.ball_specs):
+            messagebox.showinfo("Select Ball", "Select a ball row to remove.")
+            return
+        if len(self.ball_specs) == 1:
+            messagebox.showerror("Cannot Remove", "At least one ball is required.")
+            return
+        del self.ball_specs[idx]
+        self._refresh_ball_tree(select_index=max(0, idx - 1))
+        self.status_message = f"Removed ball #{idx + 1}."
+        self._refresh_status()
+        self._save_settings_to_disk(silent=True)
+
+    def _template_fields(self) -> tuple[str, ...]:
+        return (
+            "role",
+            "radius",
+            "mass",
+            "power",
+            "hp",
+            "max_hp",
+            "vx",
+            "vy",
+            "forward_dir",
+            "color",
         )
-        self.keys_label.grid(row=row, column=0, columnspan=3, sticky="w", pady=(10, 6))
-        row += 1
-        self.status_label = ttk.Label(
-            controls,
-            textvariable=self.status_var,
-            wraplength=self.controls_wraplength,
-            justify="left",
-        )
-        self.status_label.grid(row=row, column=0, columnspan=3, sticky="w")
+
+    def _template_from_editor(self) -> dict[str, object]:
+        spec = self._ball_spec_from_editor()
+        return {field: spec[field] for field in self._template_fields()}
+
+    def _selected_template_name(self) -> str | None:
+        if self.template_listbox is None:
+            return None
+        selected = self.template_listbox.curselection()
+        if not selected:
+            return None
+        name = self.template_listbox.get(selected[0]).strip()
+        return name or None
+
+    def _refresh_template_list(self, *, select_name: str | None = None) -> None:
+        if self.template_listbox is None:
+            return
+        self.template_listbox.delete(0, "end")
+        names = sorted(self.ball_templates.keys())
+        for name in names:
+            self.template_listbox.insert("end", name)
+        if not names:
+            return
+        if select_name is None:
+            select_name = names[0]
+        if select_name in names:
+            idx = names.index(select_name)
+            self.template_listbox.selection_set(idx)
+            self.template_listbox.activate(idx)
+            self.template_name_var.set(select_name)
+
+    def _on_template_selected(self, _: tk.Event) -> None:
+        name = self._selected_template_name()
+        if name is None:
+            return
+        self.template_name_var.set(name)
+        payload = self.ball_templates.get(name)
+        if payload is None:
+            return
+        for key, value in payload.items():
+            if key not in self.ball_editor_vars:
+                continue
+            self.ball_editor_vars[key].set(value)
+
+    def save_ball_template(self) -> None:
+        name = self.template_name_var.get().strip()
+        if not name:
+            messagebox.showerror("Template Name", "Template name is required.")
+            return
+        try:
+            self.ball_templates[name] = self._template_from_editor()
+        except ValueError as exc:
+            messagebox.showerror("Template Error", str(exc))
+            return
+        self._refresh_template_list(select_name=name)
+        self.status_message = f"Saved template '{name}'."
+        self._refresh_status()
+        self._save_settings_to_disk(silent=True)
+
+    def delete_ball_template(self) -> None:
+        name = self._selected_template_name() or self.template_name_var.get().strip()
+        if not name:
+            messagebox.showinfo("Template", "Select a template to delete.")
+            return
+        if name not in self.ball_templates:
+            messagebox.showinfo("Template", f"Template '{name}' not found.")
+            return
+        del self.ball_templates[name]
+        self._refresh_template_list()
+        self.status_message = f"Deleted template '{name}'."
+        self._refresh_status()
+        self._save_settings_to_disk(silent=True)
+
+    def apply_template_to_selected(self) -> None:
+        template_name = self._selected_template_name()
+        if template_name is None:
+            messagebox.showinfo("Template", "Select a template first.")
+            return
+        idx = self._selected_ball_index()
+        if idx is None or idx >= len(self.ball_specs):
+            messagebox.showinfo("Select Ball", "Select a ball row to apply template.")
+            return
+        payload = self.ball_templates.get(template_name)
+        if payload is None:
+            messagebox.showerror("Template", f"Template '{template_name}' not found.")
+            return
+        updated = dict(self.ball_specs[idx])
+        updated.update(payload)
+        self.ball_specs[idx] = self._normalize_ball_spec(updated, idx)
+        self._refresh_ball_tree(select_index=idx)
+        self.status_message = f"Applied template '{template_name}' to ball #{idx + 1}."
+        self._refresh_status()
+        self._save_settings_to_disk(silent=True)
+
+    def apply_template_to_all(self) -> None:
+        template_name = self._selected_template_name()
+        if template_name is None:
+            messagebox.showinfo("Template", "Select a template first.")
+            return
+        payload = self.ball_templates.get(template_name)
+        if payload is None:
+            messagebox.showerror("Template", f"Template '{template_name}' not found.")
+            return
+        updated_specs: list[dict[str, object]] = []
+        for idx, spec in enumerate(self.ball_specs):
+            merged = dict(spec)
+            merged.update(payload)
+            updated_specs.append(self._normalize_ball_spec(merged, idx))
+        self.ball_specs = updated_specs
+        self._refresh_ball_tree(select_index=0)
+        self.status_message = f"Applied template '{template_name}' to all balls."
+        self._refresh_status()
+        self._save_settings_to_disk(silent=True)
 
     def _add_field(self, parent: ttk.Frame, row: int, key: str, label: str) -> int:
         label_widget = ttk.Label(parent, text=label)
@@ -446,11 +1199,25 @@ class PhysicsLabApp:
             return
         var.set(float(value))
 
+    def _get_custom_data_text(self) -> str:
+        if self.custom_data_text_widget is not None:
+            self.custom_data_text = self.custom_data_text_widget.get("1.0", "end-1c")
+        return self.custom_data_text
+
+    def _set_custom_data_text(self, text: str) -> None:
+        self.custom_data_text = text
+        if self.custom_data_text_widget is None:
+            return
+        self.custom_data_text_widget.delete("1.0", "end")
+        self.custom_data_text_widget.insert("1.0", text)
+
     def _build_settings_payload(self) -> dict[str, object]:
         return {
             "version": SETTINGS_VERSION,
             "values": {key: self._get_var_value(key) for key in self.vars},
             "locks": {key: bool(lock_var.get()) for key, lock_var in self.lock_vars.items()},
+            "ball_specs": self.ball_specs,
+            "ball_templates": self.ball_templates,
         }
 
     def _apply_settings_payload(self, payload: dict[str, object]) -> None:
@@ -468,6 +1235,42 @@ class PhysicsLabApp:
                     continue
                 self.lock_vars[key].set(bool(value))
                 self._apply_widget_lock_state(key)
+
+        raw_ball_specs = payload.get("ball_specs")
+        if isinstance(raw_ball_specs, list):
+            normalized_specs: list[dict[str, object]] = []
+            for idx, item in enumerate(raw_ball_specs):
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    normalized_specs.append(self._normalize_ball_spec(item, idx))
+                except (TypeError, ValueError):
+                    continue
+            if normalized_specs:
+                self.ball_specs = normalized_specs
+
+        raw_templates = payload.get("ball_templates")
+        if isinstance(raw_templates, dict):
+            normalized_templates: dict[str, dict[str, object]] = {}
+            for name, item in raw_templates.items():
+                template_name = str(name).strip()
+                if not template_name or not isinstance(item, dict):
+                    continue
+                try:
+                    normalized = self._normalize_ball_spec(item, 0)
+                except (TypeError, ValueError):
+                    continue
+                normalized_templates[template_name] = {
+                    field: normalized[field] for field in self._template_fields()
+                }
+            self.ball_templates = normalized_templates
+
+        raw_custom_data = payload.get("custom_data_text")
+        if isinstance(raw_custom_data, str) and raw_custom_data.strip():
+            self._set_custom_data_text(raw_custom_data)
+
+        self._refresh_ball_tree()
+        self._refresh_template_list()
 
     def _save_settings_to_disk(self, *, silent: bool = False) -> bool:
         payload = self._build_settings_payload()
@@ -522,6 +1325,9 @@ class PhysicsLabApp:
         except ValueError as exc:
             messagebox.showerror("Invalid value", str(exc))
             return
+        self.battle_over = False
+        self.battle_report_text = ""
+        self.paused = False
         self.status_message = f"Loaded settings from {self.settings_path.name} and respawned."
         self._refresh_status()
         self._save_settings_to_disk(silent=True)
@@ -570,11 +1376,27 @@ class PhysicsLabApp:
         self.tooltip.hide()
         self.controls_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
+    def _on_custom_text_mousewheel(self, event: tk.Event) -> str:
+        if self.custom_data_text_widget is None:
+            return "break"
+        if event.delta == 0:
+            return "break"
+        self.custom_data_text_widget.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        return "break"
+
+    def _on_custom_text_return(self, event: tk.Event) -> str:
+        if self.custom_data_text_widget is None:
+            return "break"
+        self.custom_data_text_widget.insert("insert", "\n")
+        return "break"
+
     def _bind_keys(self) -> None:
         self.root.bind("<space>", lambda _: self.toggle_pause())
         self.root.bind("<Return>", lambda _: self.apply_and_respawn())
         self.root.bind("r", lambda _: self.apply_and_respawn())
         self.root.bind("k", lambda _: self.random_kick())
+        self.root.bind("b", lambda _: self.run_battle_feel_report())
+        self.root.bind("n", lambda _: self.run_random_battle_feel_report())
 
     def _build_tuning(self) -> PhysicsTuning:
         return PhysicsTuning(
@@ -608,26 +1430,164 @@ class PhysicsLabApp:
         )
 
     def _create_world(self) -> PhysicsWorld:
-        tuning = self._build_tuning()
-        return create_duel_world(
-            width=self.canvas_width,
-            height=self.canvas_height,
-            balls_per_side=int(self.vars["balls_per_side"].get()),
-            left_radius=float(self.vars["left_radius"].get()),
-            right_radius=float(self.vars["right_radius"].get()),
-            left_mass=float(self.vars["left_mass"].get()),
-            right_mass=float(self.vars["right_mass"].get()),
-            left_power=float(self.vars["left_power"].get()),
-            right_power=float(self.vars["right_power"].get()),
-            left_hp=float(self.vars["left_hp"].get()),
-            right_hp=float(self.vars["right_hp"].get()),
-            left_initial_speed=float(self.vars["left_speed"].get()),
-            right_initial_speed=float(self.vars["right_speed"].get()),
-            side_margin=float(self.vars["side_margin"].get()),
-            left_invincible=bool(self.vars["left_invincible"].get()),
-            right_invincible=bool(self.vars["right_invincible"].get()),
-            tuning=tuning,
+        if not self.ball_specs:
+            raise ValueError("At least one ball is required.")
+        return self._create_world_from_custom_payload(
+            {
+                "balls": self.ball_specs,
+                "invincible_teams": [],
+            }
         )
+
+    def _create_world_from_custom_payload(self, payload: object) -> PhysicsWorld:
+        if not isinstance(payload, dict):
+            raise ValueError("Custom JSON root must be an object.")
+
+        balls_raw = payload.get("balls")
+        if not isinstance(balls_raw, list) or len(balls_raw) == 0:
+            raise ValueError("`balls` must be a non-empty array.")
+
+        invincible_raw = payload.get("invincible_teams", [])
+        invincible_teams: set[str] = set()
+        if isinstance(invincible_raw, list):
+            for team in invincible_raw:
+                team_name = str(team).strip().lower()
+                if team_name:
+                    invincible_teams.add(team_name)
+
+        side_margin = float(self.vars["side_margin"].get())
+        left_speed = abs(float(self.vars["left_speed"].get()))
+        right_speed = abs(float(self.vars["right_speed"].get()))
+        team_slots: dict[str, int] = defaultdict(int)
+        bodies: list[PhysicsBody] = []
+
+        for idx, raw_ball in enumerate(balls_raw):
+            if not isinstance(raw_ball, dict):
+                raise ValueError(f"`balls[{idx}]` must be an object.")
+
+            team = str(raw_ball.get("team", "left")).strip().lower()
+            if not team:
+                raise ValueError(f"`balls[{idx}].team` is required.")
+            role = self._normalize_role(raw_ball.get("role", "dealer"))
+
+            radius = float(raw_ball.get("radius", 32.0))
+            mass = float(raw_ball.get("mass", 1.0))
+            power = float(raw_ball.get("power", 1.0))
+            hp = float(raw_ball.get("hp", 100.0))
+            max_hp = float(raw_ball.get("max_hp", hp))
+            if radius <= 0:
+                raise ValueError(f"`balls[{idx}].radius` must be > 0.")
+            if mass <= 0:
+                raise ValueError(f"`balls[{idx}].mass` must be > 0.")
+            if power <= 0:
+                raise ValueError(f"`balls[{idx}].power` must be > 0.")
+            if max_hp <= 0:
+                raise ValueError(f"`balls[{idx}].max_hp` must be > 0.")
+            if hp < 0:
+                raise ValueError(f"`balls[{idx}].hp` must be >= 0.")
+            hp = min(hp, max_hp)
+
+            default_forward = 1.0 if team == "left" else (-1.0 if team == "right" else 0.0)
+            forward_dir = float(raw_ball.get("forward_dir", default_forward))
+            if "vx" in raw_ball:
+                vx = float(raw_ball["vx"])
+            elif team == "left":
+                vx = left_speed
+            elif team == "right":
+                vx = -right_speed
+            else:
+                vx = 0.0
+            vy = float(raw_ball.get("vy", 0.0))
+
+            slot = team_slots[team]
+            team_slots[team] += 1
+            spacing = radius * 2.3
+            x_raw = raw_ball.get("x")
+            if x_raw is not None and str(x_raw).strip() != "":
+                x = float(x_raw)
+            elif team == "left":
+                x = side_margin + radius + (slot * spacing)
+            elif team == "right":
+                x = self.canvas_width - side_margin - radius - (slot * spacing)
+            else:
+                x = (self.canvas_width * 0.5) + ((slot - 0.5) * spacing)
+
+            y_raw = raw_ball.get("y")
+            if y_raw is not None and str(y_raw).strip() != "":
+                y = float(y_raw)
+            else:
+                y = self.canvas_height - radius
+
+            x = min(self.canvas_width - radius, max(radius, x))
+            y = min(self.canvas_height - radius, max(radius, y))
+            if team == "left":
+                default_color = "#4aa3ff"
+            elif team == "right":
+                default_color = "#f26b5e"
+            else:
+                default_color = "#dce6f2"
+            color = str(raw_ball.get("color", default_color))
+
+            bodies.append(
+                PhysicsBody(
+                    body_id=idx,
+                    team=team,
+                    x=x,
+                    y=y,
+                    vx=vx,
+                    vy=vy,
+                    radius=radius,
+                    mass=mass,
+                    color=color,
+                    power=power,
+                    role=role,
+                    forward_dir=forward_dir,
+                    max_hp=max_hp,
+                    hp=hp,
+                )
+            )
+
+        return PhysicsWorld(
+            width=float(self.canvas_width),
+            height=float(self.canvas_height),
+            bodies=bodies,
+            tuning=self._build_tuning(),
+            invincible_teams=invincible_teams,
+        )
+
+    def fill_custom_data_example(self) -> None:
+        self._set_custom_data_text(json.dumps(CUSTOM_BALLS_TEMPLATE, indent=2))
+        self.status_message = "Filled custom JSON example."
+        self._refresh_status()
+        self._save_settings_to_disk(silent=True)
+
+    def apply_custom_data_and_respawn(self) -> None:
+        raw = self._get_custom_data_text().strip()
+        if not raw:
+            messagebox.showerror("Custom Data Error", "Custom JSON is empty.")
+            return
+
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            messagebox.showerror(
+                "Custom Data Error",
+                f"Invalid JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}",
+            )
+            return
+
+        try:
+            self.world = self._create_world_from_custom_payload(payload)
+        except (TypeError, ValueError) as exc:
+            messagebox.showerror("Custom Data Error", str(exc))
+            return
+
+        self.battle_over = False
+        self.battle_report_text = ""
+        self.paused = False
+        self.status_message = f"Applied custom JSON and respawned {len(self.world.bodies)} balls."
+        self._refresh_status()
+        self._save_settings_to_disk(silent=True)
 
     def _selected_invincible_teams(self) -> set[str]:
         teams: set[str] = set()
@@ -640,11 +1600,10 @@ class PhysicsLabApp:
     def apply_no_respawn(self) -> None:
         try:
             self.world.set_tuning(self._build_tuning())
-            self.world.set_invincible_teams(self._selected_invincible_teams())
         except ValueError as exc:
             messagebox.showerror("Invalid value", str(exc))
             return
-        self.status_message = "Applied tuning/invincible settings without respawn."
+        self.status_message = "Applied environment/physics settings without respawn."
         self._refresh_status()
         self._save_settings_to_disk(silent=True)
 
@@ -654,10 +1613,161 @@ class PhysicsLabApp:
         except ValueError as exc:
             messagebox.showerror("Invalid value", str(exc))
             return
-        balls_per_side = int(self.vars["balls_per_side"].get())
-        self.status_message = f"Applied values and respawned {balls_per_side} balls per side."
+        self.battle_over = False
+        self.battle_report_text = ""
+        self.paused = False
+        self.status_message = f"Respawned {len(self.ball_specs)} balls from Ball List."
         self._refresh_status()
         self._save_settings_to_disk(silent=True)
+
+    def _timestamped_report_paths(self, report_dir: Path, prefix: str) -> tuple[Path, Path, Path]:
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return (
+            report_dir / f"{prefix}_{stamp}.md",
+            report_dir / f"{prefix}_{stamp}.json",
+            report_dir / f"{prefix}_{stamp}.html",
+        )
+
+    def run_battle_feel_report(self) -> None:
+        payload = self._build_settings_payload()
+        report_dir = self.settings_path.resolve().parent / "reports"
+        report_md_path, report_json_path, report_html_path = self._timestamped_report_paths(
+            report_dir,
+            "battle_feel_report",
+        )
+
+        try:
+            self.root.config(cursor="watch")
+            self.root.update_idletasks()
+            result = run_profile_sweep_from_settings_payload(
+                settings_payload=payload,
+                settings_label=f"{self.settings_path.name} (lab-live)",
+                seeds=6,
+                duration=24.0,
+                dt=self.fixed_dt,
+                top_k=10,
+                speed_jitter=12.0,
+                width=float(self.canvas_width),
+                height=float(self.canvas_height),
+            )
+        except ValueError as exc:
+            messagebox.showerror("Battle Report Error", str(exc))
+            return
+        finally:
+            self.root.config(cursor="")
+
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_md_path.write_text(sweep_result_to_markdown(result), encoding="utf-8")
+        report_json_path.write_text(
+            json.dumps(sweep_result_to_json_dict(result), indent=2),
+            encoding="utf-8",
+        )
+        report_html_path.write_text(sweep_result_to_html(result), encoding="utf-8")
+
+        best = result.top_scenarios[0] if result.top_scenarios else None
+        if best is None:
+            self.status_message = "Battle report completed. No scenarios were generated."
+        else:
+            self.status_message = (
+                "Battle report done. "
+                f"Best={best.scenario_name} score={best.score:.2f} "
+                f"(coll/s={best.avg_collisions_per_second:.2f}, dmg/s={best.avg_damage_per_second:.2f})"
+            )
+        self._refresh_status()
+        messagebox.showinfo(
+            "Battle Report",
+            f"Saved report files:\n- {report_md_path}\n- {report_json_path}\n- {report_html_path}",
+        )
+
+    def run_random_battle_feel_report(self) -> None:
+        payload = self._build_settings_payload()
+        report_dir = self.settings_path.resolve().parent / "reports"
+        report_md_path, report_json_path, report_html_path = self._timestamped_report_paths(
+            report_dir,
+            "battle_feel_random_report",
+        )
+
+        try:
+            self.root.config(cursor="watch")
+            self.root.update_idletasks()
+            result = run_random_profile_sweep_from_settings_payload(
+                settings_payload=payload,
+                settings_label=f"{self.settings_path.name} (lab-live-random)",
+                scenario_count=80,
+                profile_seed=2026,
+                seeds=4,
+                duration=24.0,
+                dt=self.fixed_dt,
+                top_k=12,
+                speed_jitter=14.0,
+                width=float(self.canvas_width),
+                height=float(self.canvas_height),
+            )
+        except ValueError as exc:
+            messagebox.showerror("Random Battle Report Error", str(exc))
+            return
+        finally:
+            self.root.config(cursor="")
+
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_md_path.write_text(sweep_result_to_markdown(result), encoding="utf-8")
+        report_json_path.write_text(
+            json.dumps(sweep_result_to_json_dict(result), indent=2),
+            encoding="utf-8",
+        )
+        report_html_path.write_text(sweep_result_to_html(result), encoding="utf-8")
+
+        best = result.top_scenarios[0] if result.top_scenarios else None
+        if best is None:
+            self.status_message = "Random battle report completed. No scenarios were generated."
+        else:
+            self.status_message = (
+                "Random battle report done. "
+                f"Best={best.scenario_name} score={best.score:.2f} "
+                f"(coll/s={best.avg_collisions_per_second:.2f}, dmg/s={best.avg_damage_per_second:.2f})"
+            )
+        self._refresh_status()
+        messagebox.showinfo(
+            "Random Battle Report",
+            f"Saved report files:\n- {report_md_path}\n- {report_json_path}\n- {report_html_path}",
+        )
+
+    def _alive_bodies(self) -> list[PhysicsBody]:
+        return [body for body in self.world.bodies if body.is_alive]
+
+    def _check_battle_end(self) -> None:
+        if self.battle_over:
+            return
+        alive = self._alive_bodies()
+        if len(alive) > 1:
+            return
+
+        left_alive = sum(1 for body in self.world.bodies if body.team == "left" and body.is_alive)
+        right_alive = sum(1 for body in self.world.bodies if body.team == "right" and body.is_alive)
+        left_hp = sum(body.hp for body in self.world.bodies if body.team == "left")
+        right_hp = sum(body.hp for body in self.world.bodies if body.team == "right")
+        if len(alive) == 0:
+            winner_text = "전멸 무승부"
+        else:
+            winner_text = f"{alive[0].team.upper()} 승리"
+        self.battle_report_text = (
+            f"{winner_text}\n"
+            f"time={self.world.time_elapsed:.2f}s collisions={self.world.total_collisions}\n"
+            f"L alive={left_alive} hp={left_hp:.1f} | R alive={right_alive} hp={right_hp:.1f}\n"
+            "클릭하면 다시 시작"
+        )
+        self.battle_over = True
+        self.paused = True
+        self.status_message = "Battle finished. Click center overlay to respawn."
+        self._refresh_status()
+
+    def _on_canvas_click(self, event: tk.Event) -> None:
+        if not self.battle_over:
+            return
+        center_x = self.canvas_width * 0.5
+        center_y = self.canvas_height * 0.5
+        if abs(event.x - center_x) <= 260 and abs(event.y - center_y) <= 110:
+            self.apply_and_respawn()
 
     def random_kick(self) -> None:
         self.world.add_random_impulse(magnitude=460.0)
@@ -670,7 +1780,10 @@ class PhysicsLabApp:
         self._refresh_status()
 
     def step_once(self) -> None:
+        if self.battle_over:
+            return
         self.world.step(self.fixed_dt)
+        self._check_battle_end()
         self._draw_world()
         self.status_message = "Advanced one physics tick."
         self._refresh_status()
@@ -691,6 +1804,15 @@ class PhysicsLabApp:
             sum((body.vx * body.vx + body.vy * body.vy) ** 0.5 for body in bodies) / count
         )
         return count, alive_count, avg_hp, avg_stagger, avg_speed
+
+    def _power_emoticon(self, power: float) -> str:
+        if power < 1.0:
+            return ":-|"
+        if power < 1.6:
+            return ":-)"
+        if power < 2.4:
+            return ":-D"
+        return ">:-D"
 
     def _refresh_status(self) -> None:
         left_count, left_alive, left_hp, left_stagger, left_speed = self._team_live_stats("left")
@@ -763,21 +1885,34 @@ class PhysicsLabApp:
                 fill="#f6f7f9",
                 width=1,
             )
-            self.canvas.create_text(
-                body.x,
-                body.y - r - 28,
-                text=(
-                    f"{body.team} "
-                    f"{'INV' if self.world.is_team_invincible(body.team) else 'DMG'} "
-                    f"HP={body.hp:5.1f}/{body.max_hp:5.1f}"
-                ),
-                fill="#dce6f2",
-                font=("Consolas", 10),
+
+            hp_ratio = 0.0 if body.max_hp <= 0 else max(0.0, min(1.0, body.hp / body.max_hp))
+            bar_w = max(28.0, r * 2.0)
+            bar_h = 7.0
+            bar_x0 = body.x - (bar_w * 0.5)
+            bar_y0 = body.y - r - 24
+            self.canvas.create_rectangle(
+                bar_x0,
+                bar_y0,
+                bar_x0 + bar_w,
+                bar_y0 + bar_h,
+                fill="#2b1f27",
+                outline="#111820",
+                width=1,
             )
+            self.canvas.create_rectangle(
+                bar_x0,
+                bar_y0,
+                bar_x0 + (bar_w * hp_ratio),
+                bar_y0 + bar_h,
+                fill="#4ad06f",
+                outline="",
+            )
+
             self.canvas.create_text(
                 body.x,
                 body.y - r - 14,
-                text=f"P={body.power:.2f} STG={body.stagger_timer:.2f} DMG={body.last_damage:.2f}",
+                text=f"HP {body.hp:.0f}/{body.max_hp:.0f}",
                 fill="#dce6f2",
                 font=("Consolas", 10),
             )
@@ -795,6 +1930,29 @@ class PhysicsLabApp:
             ),
         )
 
+        if self.battle_over:
+            panel_w = 520
+            panel_h = 180
+            x0 = (self.canvas_width - panel_w) * 0.5
+            y0 = (self.canvas_height - panel_h) * 0.5
+            self.canvas.create_rectangle(
+                x0,
+                y0,
+                x0 + panel_w,
+                y0 + panel_h,
+                fill="#0f1724",
+                outline="#dce6f2",
+                width=2,
+            )
+            self.canvas.create_text(
+                self.canvas_width * 0.5,
+                self.canvas_height * 0.5,
+                text=self.battle_report_text,
+                fill="#e6edf3",
+                font=("Consolas", 14),
+                justify="center",
+            )
+
     def run(self) -> None:
         self._refresh_status()
         self._tick()
@@ -809,11 +1967,14 @@ class PhysicsLabApp:
         frame_dt = min(0.1, now - self.last_frame_time)
         self.last_frame_time = now
 
-        if not self.paused:
+        if not self.paused and not self.battle_over:
             self.accumulator += frame_dt
             while self.accumulator >= self.fixed_dt:
                 self.world.step(self.fixed_dt)
                 self.accumulator -= self.fixed_dt
+                self._check_battle_end()
+                if self.battle_over:
+                    break
 
         self._draw_world()
         self._refresh_status()

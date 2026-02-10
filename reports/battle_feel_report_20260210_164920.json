@@ -1,0 +1,109 @@
+{
+  "settings_path": "visual_physics_lab_settings.json",
+  "seeds": 2,
+  "duration": 1.5,
+  "dt": 0.008333333333333333,
+  "scenario_count": 36,
+  "top_scenarios": [
+    {
+      "scenario_name": "L:duelist vs R:juggernaut",
+      "left_profile": {
+        "name": "duelist",
+        "radius_scale": 0.9,
+        "mass_scale": 0.95,
+        "power_scale": 1.15,
+        "hp_scale": 1.0,
+        "speed_scale": 1.3
+      },
+      "right_profile": {
+        "name": "juggernaut",
+        "radius_scale": 1.2,
+        "mass_scale": 1.72,
+        "power_scale": 1.08,
+        "hp_scale": 1.84,
+        "speed_scale": 0.72
+      },
+      "run_count": 2,
+      "score": 24.6,
+      "win_rate_left": 0.0,
+      "avg_duration": 1.4999999999999971,
+      "avg_fight_end_time": 1.5,
+      "avg_collisions_per_second": 2.000000000000004,
+      "avg_damage_per_second": 9.577029833269401,
+      "avg_damage_per_collision": 4.788514916634692,
+      "avg_air_ratio": 0.002777777777777778,
+      "avg_lead_changes": 0.0,
+      "avg_collision_bursts": 1.0,
+      "avg_peak_speed": 1092.3447802981555
+    },
+    {
+      "scenario_name": "L:balanced vs R:duelist",
+      "left_profile": {
+        "name": "balanced",
+        "radius_scale": 1.0,
+        "mass_scale": 1.0,
+        "power_scale": 1.0,
+        "hp_scale": 1.0,
+        "speed_scale": 1.0
+      },
+      "right_profile": {
+        "name": "duelist",
+        "radius_scale": 0.9,
+        "mass_scale": 0.95,
+        "power_scale": 1.15,
+        "hp_scale": 1.0,
+        "speed_scale": 1.3
+      },
+      "run_count": 2,
+      "score": 21.77,
+      "win_rate_left": 1.0,
+      "avg_duration": 1.4999999999999971,
+      "avg_fight_end_time": 1.5,
+      "avg_collisions_per_second": 2.000000000000004,
+      "avg_damage_per_second": 7.317850807762487,
+      "avg_damage_per_collision": 3.6589254038812364,
+      "avg_air_ratio": 0.04166666666666667,
+      "avg_lead_changes": 0.0,
+      "avg_collision_bursts": 1.0,
+      "avg_peak_speed": 1179.261312307462
+    },
+    {
+      "scenario_name": "L:balanced vs R:balanced",
+      "left_profile": {
+        "name": "balanced",
+        "radius_scale": 1.0,
+        "mass_scale": 1.0,
+        "power_scale": 1.0,
+        "hp_scale": 1.0,
+        "speed_scale": 1.0
+      },
+      "right_profile": {
+        "name": "balanced",
+        "radius_scale": 1.0,
+        "mass_scale": 1.0,
+        "power_scale": 1.0,
+        "hp_scale": 1.0,
+        "speed_scale": 1.0
+      },
+      "run_count": 2,
+      "score": 21.38,
+      "win_rate_left": 1.0,
+      "avg_duration": 1.4999999999999971,
+      "avg_fight_end_time": 1.5,
+      "avg_collisions_per_second": 2.000000000000004,
+      "avg_damage_per_second": 7.003202462026076,
+      "avg_damage_per_collision": 3.5016012310130313,
+      "avg_air_ratio": 0.014814814814814815,
+      "avg_lead_changes": 0.0,
+      "avg_collision_bursts": 1.0,
+      "avg_peak_speed": 1084.33042135707
+    }
+  ],
+  "recommendations": [
+    "\uccb4\uacf5 \ube44\uc728\uc774 \ub0ae\uc544 \ud0c0\uaca9 \uc5f0\ucd9c\uc774 \ud3c9\ud3c9\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4. \uacbd\ub7c9(\uc9c8\ub7c9 0.8x) + \uace0\ud30c\uc6cc(1.25x) \uc0d8\ud50c\uc744 \ub298\ub824 \ubcf4\uc138\uc694.",
+    "\uc5ed\uc804 \uad6c\uac04\uc774 \uc801\uc2b5\ub2c8\ub2e4. `bruiser vs striker`, `juggernaut vs duelist` \uac19\uc740 \uadf9\ub2e8 \uc870\ud569\uc744 \ub298\ub824 \ubcf4\uc138\uc694.",
+    "\ucd94\uac00 \uc81c\uc548: \ucda9\ub3cc \uc21c\uac04 0.03~0.06\ucd08 `hit-stop`\uc744 \ub123\uc73c\uba74 \uc784\ud329\ud2b8\uac00 \ub354 \uac15\ud558\uac8c \ub290\uaef4\uc9d1\ub2c8\ub2e4.",
+    "\ucd94\uac00 \uc81c\uc548: \uc5f0\uc18d \ucda9\ub3cc `combo` \uc218\ub97c \ucd94\uc801\ud574 \ucf64\ubcf4 \ub2e8\uacc4\ubcc4\ub85c SFX/\ud30c\ud2f0\ud074 \uac15\ub3c4\ub97c \uc62c\ub824 \ubcf4\uc138\uc694.",
+    "\ucd94\uac00 \uc81c\uc548: \ubcfc\ubcc4 `poise(\uacbd\uc9c1 \uc800\ud56d)` \uc2a4\ud0ef\uc744 \ucd94\uac00\ud574 \uac19\uc740 \uc9c8\ub7c9\uc774\ub77c\ub3c4 \uccb4\uac10 \ucc28\uc774\ub97c \ub9cc\ub4e4 \uc218 \uc788\uc2b5\ub2c8\ub2e4."
+  ]
+}

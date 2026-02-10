@@ -17,11 +17,13 @@ class PhysicsBody:
     mass: float
     color: str
     power: float = 1.0
+    role: str = "dealer"
     forward_dir: float = 0.0
     max_hp: float = 100.0
     hp: float = 100.0
     stagger_timer: float = 0.0
     last_damage: float = 0.0
+    ability_cooldown: float = 0.0
 
     def __post_init__(self) -> None:
         if self.radius <= 0:
@@ -36,12 +38,23 @@ class PhysicsBody:
             raise ValueError("hp must be >= 0")
         if self.stagger_timer < 0:
             raise ValueError("stagger_timer must be >= 0")
+        if self.ability_cooldown < 0:
+            raise ValueError("ability_cooldown must be >= 0")
         if self.hp > self.max_hp:
             self.hp = self.max_hp
+        self.role = self._normalize_role(self.role)
 
     @property
     def is_alive(self) -> bool:
         return self.hp > 0
+
+    @staticmethod
+    def _normalize_role(raw: str) -> str:
+        role = str(raw).strip().lower()
+        allowed = {"tank", "dealer", "healer", "ranged_dealer", "ranged_healer"}
+        if role not in allowed:
+            return "dealer"
+        return role
 
 
 @dataclass(slots=True)
@@ -73,6 +86,13 @@ class PhysicsTuning:
     stagger_scale: float = 0.0012
     max_stagger: float = 1.20
     stagger_drive_multiplier: float = 0.0
+    ranged_attack_cooldown: float = 1.00
+    ranged_attack_range: float = 520.0
+    ranged_knockback_force: float = 240.0
+    ranged_damage: float = 5.5
+    healer_cooldown: float = 1.20
+    healer_range: float = 360.0
+    healer_amount: float = 10.0
 
     def validate(self) -> None:
         if self.restitution < 0:
@@ -125,6 +145,20 @@ class PhysicsTuning:
             raise ValueError("max_stagger must be >= 0")
         if self.stagger_drive_multiplier < 0:
             raise ValueError("stagger_drive_multiplier must be >= 0")
+        if self.ranged_attack_cooldown <= 0:
+            raise ValueError("ranged_attack_cooldown must be > 0")
+        if self.ranged_attack_range <= 0:
+            raise ValueError("ranged_attack_range must be > 0")
+        if self.ranged_knockback_force < 0:
+            raise ValueError("ranged_knockback_force must be >= 0")
+        if self.ranged_damage < 0:
+            raise ValueError("ranged_damage must be >= 0")
+        if self.healer_cooldown <= 0:
+            raise ValueError("healer_cooldown must be > 0")
+        if self.healer_range <= 0:
+            raise ValueError("healer_range must be > 0")
+        if self.healer_amount < 0:
+            raise ValueError("healer_amount must be >= 0")
 
 
 @dataclass(slots=True)
@@ -165,13 +199,16 @@ class PhysicsWorld:
             raise ValueError("magnitude must be > 0")
         rng = random.Random(seed)
         for body in self.bodies:
+            if not body.is_alive:
+                continue
             body.vx += rng.uniform(-magnitude, magnitude) / body.mass
             body.vy += rng.uniform(-magnitude, magnitude) / body.mass
 
     def max_speed(self) -> float:
-        if not self.bodies:
+        alive = [body for body in self.bodies if body.is_alive]
+        if not alive:
             return 0.0
-        return max(math.hypot(body.vx, body.vy) for body in self.bodies)
+        return max(math.hypot(body.vx, body.vy) for body in alive)
 
     def step(self, dt: float) -> None:
         if dt <= 0:
@@ -181,8 +218,16 @@ class PhysicsWorld:
 
         for body in self.bodies:
             body.last_damage = 0.0
+            if not body.is_alive:
+                body.vx = 0.0
+                body.vy = 0.0
+                body.stagger_timer = 0.0
+                body.ability_cooldown = 0.0
+                continue
             if body.stagger_timer > 0:
                 body.stagger_timer = max(0.0, body.stagger_timer - dt)
+            if body.ability_cooldown > 0:
+                body.ability_cooldown = max(0.0, body.ability_cooldown - dt)
 
             on_ground = self._is_grounded(body)
             drive_force = 0.0
@@ -215,6 +260,8 @@ class PhysicsWorld:
         impact_pairs: set[tuple[int, int]] = set()
         for _ in range(self.tuning.solver_passes):
             collision_count += self._resolve_body_collisions(current_contacts, impact_pairs)
+
+        self._apply_role_actions()
 
         self.active_contacts = current_contacts
         self.last_step_collisions = collision_count
@@ -264,8 +311,12 @@ class PhysicsWorld:
 
         for i in range(count):
             a = self.bodies[i]
+            if not a.is_alive:
+                continue
             for j in range(i + 1, count):
                 b = self.bodies[j]
+                if not b.is_alive:
+                    continue
                 if a.team == b.team:
                     continue
                 dx = b.x - a.x
@@ -412,6 +463,116 @@ class PhysicsWorld:
         )
         a.stagger_timer = max(a.stagger_timer, stagger_a)
         b.stagger_timer = max(b.stagger_timer, stagger_b)
+
+    def _closest_enemy(self, actor: PhysicsBody, max_range: float) -> PhysicsBody | None:
+        closest: PhysicsBody | None = None
+        closest_dist_sq = max_range * max_range
+        for other in self.bodies:
+            if not other.is_alive or other.team == actor.team:
+                continue
+            dx = other.x - actor.x
+            dy = other.y - actor.y
+            dist_sq = (dx * dx) + (dy * dy)
+            if dist_sq <= closest_dist_sq:
+                closest_dist_sq = dist_sq
+                closest = other
+        return closest
+
+    def _weakest_ally(self, actor: PhysicsBody, max_range: float) -> PhysicsBody | None:
+        weakest: PhysicsBody | None = None
+        weakest_ratio = 1.1
+        max_range_sq = max_range * max_range
+        for other in self.bodies:
+            if not other.is_alive or other.team != actor.team:
+                continue
+            dx = other.x - actor.x
+            dy = other.y - actor.y
+            if (dx * dx) + (dy * dy) > max_range_sq:
+                continue
+            if other.max_hp <= 0:
+                continue
+            hp_ratio = other.hp / other.max_hp
+            if hp_ratio < weakest_ratio and other.hp < other.max_hp:
+                weakest_ratio = hp_ratio
+                weakest = other
+        return weakest
+
+    def _apply_ranged_knockback(
+        self,
+        actor: PhysicsBody,
+        target: PhysicsBody,
+        *,
+        force: float,
+        damage: float,
+    ) -> None:
+        if not target.is_alive:
+            return
+        dx = target.x - actor.x
+        dy = target.y - actor.y
+        distance = math.hypot(dx, dy)
+        if distance <= 1e-9:
+            nx = actor.forward_dir if abs(actor.forward_dir) > 1e-6 else 1.0
+            ny = 0.0
+        else:
+            nx = dx / distance
+            ny = dy / distance
+
+        target.vx += nx * (force / max(1e-6, target.mass))
+        target.vy += (ny * 0.12 - 0.18) * (force / max(1e-6, target.mass))
+        target.stagger_timer = max(
+            target.stagger_timer,
+            min(self.tuning.max_stagger, self.tuning.stagger_base + 0.12),
+        )
+
+        if damage > 0 and not self.is_team_invincible(target.team):
+            scaled_damage = damage * max(0.6, actor.power)
+            target.hp = max(0.0, target.hp - scaled_damage)
+            target.last_damage = max(target.last_damage, scaled_damage)
+
+    def _apply_role_actions(self) -> None:
+        for actor in self.bodies:
+            if not actor.is_alive:
+                continue
+            if actor.ability_cooldown > 0:
+                continue
+
+            role = actor.role
+            if role == "ranged_dealer":
+                target = self._closest_enemy(actor, self.tuning.ranged_attack_range)
+                if target is None:
+                    continue
+                self._apply_ranged_knockback(
+                    actor,
+                    target,
+                    force=self.tuning.ranged_knockback_force,
+                    damage=self.tuning.ranged_damage,
+                )
+                actor.ability_cooldown = self.tuning.ranged_attack_cooldown
+            elif role == "healer":
+                target = self._weakest_ally(actor, self.tuning.healer_range * 0.7)
+                if target is None:
+                    continue
+                heal = self.tuning.healer_amount * 0.8
+                target.hp = min(target.max_hp, target.hp + heal)
+                actor.ability_cooldown = self.tuning.healer_cooldown
+            elif role == "ranged_healer":
+                acted = False
+                heal_target = self._weakest_ally(actor, self.tuning.healer_range)
+                if heal_target is not None:
+                    heal = self.tuning.healer_amount * 1.1
+                    heal_target.hp = min(heal_target.max_hp, heal_target.hp + heal)
+                    acted = True
+                push_target = self._closest_enemy(actor, self.tuning.ranged_attack_range * 0.9)
+                if push_target is not None:
+                    self._apply_ranged_knockback(
+                        actor,
+                        push_target,
+                        force=self.tuning.ranged_knockback_force * 0.58,
+                        damage=0.0,
+                    )
+                    acted = True
+                if acted:
+                    actor.ability_cooldown = self.tuning.healer_cooldown
 
 
 def create_duel_world(

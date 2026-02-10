@@ -19,19 +19,10 @@ Default behavior:
 - `power` affects recoil/launch plus collision damage and stagger time
 
 What you can tune in real time:
-- balls per side
-- left radius
-- left mass
-- left power
-- left hp
-- left initial speed
-- left invincible
-- right radius
-- right mass
-- right power
-- right hp
-- right initial speed
-- right invincible
+- per-ball setup using `Ball List` + `Ball Editor`
+- ball class (`tank`, `dealer`, `healer`, `ranged_dealer`, `ranged_healer`)
+- add / update / duplicate / remove balls
+- save template from current ball and apply to one/all balls
 - gravity
 - approach force (how hard units push toward center)
 - restitution (bounciness)
@@ -46,18 +37,49 @@ What you can tune in real time:
 - launch height scale (multiplier for collision pop-up height)
 - damage parameters
 - stagger parameters
-- per-field lock/unlock (`Lock` checkbox on each row)
-- quick lock actions (`Lock All`, `Unlock All`)
 - save/load settings (`Save Settings`, `Load Settings`)
 - auto-persist settings on apply/close (`visual_physics_lab_settings.json`)
+
+Ball template tips:
+- pick or edit a ball in `Ball Editor`
+- set template name and click `Save Template`
+- select template and click `Apply to Selected Ball` or `Apply to All Balls`
 
 Controls:
 - `Space`: pause/resume
 - `R`: apply values and respawn
 - `K`: random impulse kick
 - `Enter`: apply values and respawn
+- `B`: run battle-feel sweep report from current Lab state
+- `N`: run random-combination battle-feel report from current Lab state
+- battle end overlay: if all dead or only one survivor remains, click center panel to restart
 
-## 2) Tests
+## 2) Headless Battle Feel Sweep (Auto Report)
+
+Run a non-visual simulation sweep that keeps environment physics values from
+`visual_physics_lab_settings.json` and only varies ball-side profiles.
+
+```powershell
+python battle_sim_report.py
+```
+
+This creates:
+- `reports/battle_feel_report_YYYYMMDD_HHMMSS.md`
+- `reports/battle_feel_report_YYYYMMDD_HHMMSS.json`
+- `reports/battle_feel_report_YYYYMMDD_HHMMSS.html`
+
+Useful options:
+
+```powershell
+python battle_sim_report.py --seeds 8 --duration 30 --top-k 12 --speed-jitter 10
+python battle_sim_report.py --mode random --random-scenarios 120 --profile-seed 77
+```
+
+You can also run the same sweep directly in Lab using `Run Battle Feel Report`
+button (or `B` key). It uses current `Environment / Physics` + `Ball List` values.
+For random matchups in Lab, use `Run Random Battle Report` (or `N` key).
+
+## 3) Tests
 
 ```powershell
 python -m unittest discover -s tests -p "test_*.py" -v
