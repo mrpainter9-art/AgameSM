@@ -64,6 +64,29 @@ FIELD_HELP_KO: dict[str, str] = {
     "stagger_scale": "충돌 강도에 따른 경직 증가율.",
     "max_stagger": "경직 시간 상한(초).",
     "stagger_drive_multiplier": "경직 중 이동 추진력 배율(0이면 경직 중 거의 정지).",
+    "ranged_attack_cooldown": "원거리 딜러 공격 쿨타임(초).",
+    "ranged_attack_range": "원거리 딜러 공격 사거리(px).",
+    "ranged_knockback_force": "원거리 투사체 적중 시 넉백 힘.",
+    "ranged_damage": "원거리 투사체 기본 피해량.",
+    "healer_cooldown": "힐러 능력 쿨타임(초).",
+    "healer_range": "힐러 회복 사거리(px).",
+    "healer_amount": "힐러 기본 회복량.",
+    "projectile_speed": "투사체 이동 속도(px/s).",
+    "projectile_radius": "투사체 반지름(px).",
+    "projectile_lifetime": "투사체 최대 생존 시간(초).",
+    "team": "소속 팀(left / right).",
+    "role": "유닛 역할. tank, dealer, healer, ranged_dealer, ranged_healer.",
+    "color": "유닛 표시 색상(HEX 코드).",
+    "radius": "유닛 크기(px). 클수록 충돌 범위가 넓어집니다.",
+    "mass": "유닛 무게. 클수록 같은 힘에서 덜 밀리고 반동이 줄어듭니다.",
+    "power": "공격력. 클수록 충돌/투사체로 주는 반동·피해·경직이 커집니다.",
+    "hp": "현재 체력(리스폰 시 적용).",
+    "max_hp": "최대 체력. 힐로 이 값을 초과할 수 없습니다.",
+    "vx": "시작 수평 속도(px/s). 부호는 팀에 따라 자동 조정됩니다.",
+    "vy": "시작 수직 속도(px/s). 음수면 위로 뜹니다.",
+    "forward_dir": "진행 방향. 1=오른쪽, -1=왼쪽.",
+    "x": "커스텀 X 좌표(비워두면 자동 배치).",
+    "y": "커스텀 Y 좌표(비워두면 자동 배치).",
 }
 
 SETTINGS_FILE_NAME = "visual_physics_lab_settings.json"
@@ -212,6 +235,16 @@ class PhysicsLabApp:
             "stagger_scale": tk.DoubleVar(value=0.0012),
             "max_stagger": tk.DoubleVar(value=1.20),
             "stagger_drive_multiplier": tk.DoubleVar(value=0.0),
+            "ranged_attack_cooldown": tk.DoubleVar(value=1.00),
+            "ranged_attack_range": tk.DoubleVar(value=520.0),
+            "ranged_knockback_force": tk.DoubleVar(value=240.0),
+            "ranged_damage": tk.DoubleVar(value=5.5),
+            "healer_cooldown": tk.DoubleVar(value=1.20),
+            "healer_range": tk.DoubleVar(value=360.0),
+            "healer_amount": tk.DoubleVar(value=10.0),
+            "projectile_speed": tk.DoubleVar(value=600.0),
+            "projectile_radius": tk.DoubleVar(value=5.0),
+            "projectile_lifetime": tk.DoubleVar(value=2.0),
         }
         self.lock_vars: dict[str, tk.BooleanVar] = {
             key: tk.BooleanVar(value=False) for key in self.vars
@@ -393,29 +426,39 @@ class PhysicsLabApp:
         editor.columnconfigure(3, weight=1)
         erow = 0
 
-        ttk.Label(editor, text="Team").grid(row=erow, column=0, sticky="w", pady=2)
-        ttk.Combobox(
+        team_label = ttk.Label(editor, text="팀")
+        team_label.grid(row=erow, column=0, sticky="w", pady=2)
+        team_combo = ttk.Combobox(
             editor,
             values=("left", "right"),
             state="readonly",
             textvariable=self.ball_editor_vars["team"],
             width=8,
-        ).grid(row=erow, column=1, sticky="ew", pady=2, padx=(0, 8))
-        ttk.Label(editor, text="Class").grid(row=erow, column=2, sticky="w", pady=2)
-        ttk.Combobox(
+        )
+        team_combo.grid(row=erow, column=1, sticky="ew", pady=2, padx=(0, 8))
+        self._bind_field_help(team_label, "team")
+        self._bind_field_help(team_combo, "team")
+        role_label = ttk.Label(editor, text="역할")
+        role_label.grid(row=erow, column=2, sticky="w", pady=2)
+        role_combo = ttk.Combobox(
             editor,
             values=self._role_options(),
             state="readonly",
             textvariable=self.ball_editor_vars["role"],
             width=14,
-        ).grid(row=erow, column=3, sticky="ew", pady=2)
-        erow += 1
-        ttk.Label(editor, text="Color").grid(row=erow, column=0, sticky="w", pady=2)
-        ttk.Entry(editor, textvariable=self.ball_editor_vars["color"], width=10).grid(
-            row=erow, column=1, sticky="ew", pady=2, padx=(0, 8)
         )
-        ttk.Label(editor, text="Preset").grid(row=erow, column=2, sticky="w", pady=2)
-        ttk.Label(editor, text="Class quick apply").grid(row=erow, column=3, sticky="w", pady=2)
+        role_combo.grid(row=erow, column=3, sticky="ew", pady=2)
+        self._bind_field_help(role_label, "role")
+        self._bind_field_help(role_combo, "role")
+        erow += 1
+        color_label = ttk.Label(editor, text="색상")
+        color_label.grid(row=erow, column=0, sticky="w", pady=2)
+        color_entry = ttk.Entry(editor, textvariable=self.ball_editor_vars["color"], width=10)
+        color_entry.grid(row=erow, column=1, sticky="ew", pady=2, padx=(0, 8))
+        self._bind_field_help(color_label, "color")
+        self._bind_field_help(color_entry, "color")
+        ttk.Label(editor, text="프리셋").grid(row=erow, column=2, sticky="w", pady=2)
+        ttk.Label(editor, text="역할 빠른 적용").grid(row=erow, column=3, sticky="w", pady=2)
         erow += 1
         preset_row = ttk.Frame(editor)
         preset_row.grid(row=erow, column=0, columnspan=4, sticky="ew", pady=(0, 4))
@@ -437,20 +480,24 @@ class PhysicsLabApp:
         erow += 1
 
         for left_key, left_label, right_key, right_label in [
-            ("radius", "Radius", "mass", "Mass"),
-            ("power", "Power", "hp", "HP"),
-            ("max_hp", "Max HP", "vx", "Vx"),
-            ("vy", "Vy", "forward_dir", "Forward"),
-            ("x", "X (opt)", "y", "Y (opt)"),
+            ("radius", "크기", "mass", "무게"),
+            ("power", "공격력", "hp", "체력"),
+            ("max_hp", "최대체력", "vx", "수평속도"),
+            ("vy", "수직속도", "forward_dir", "방향"),
+            ("x", "X좌표", "y", "Y좌표"),
         ]:
-            ttk.Label(editor, text=left_label).grid(row=erow, column=0, sticky="w", pady=2)
-            ttk.Entry(editor, textvariable=self.ball_editor_vars[left_key], width=10).grid(
-                row=erow, column=1, sticky="ew", pady=2, padx=(0, 8)
-            )
-            ttk.Label(editor, text=right_label).grid(row=erow, column=2, sticky="w", pady=2)
-            ttk.Entry(editor, textvariable=self.ball_editor_vars[right_key], width=10).grid(
-                row=erow, column=3, sticky="ew", pady=2
-            )
+            ll = ttk.Label(editor, text=left_label)
+            ll.grid(row=erow, column=0, sticky="w", pady=2)
+            le = ttk.Entry(editor, textvariable=self.ball_editor_vars[left_key], width=10)
+            le.grid(row=erow, column=1, sticky="ew", pady=2, padx=(0, 8))
+            self._bind_field_help(ll, left_key)
+            self._bind_field_help(le, left_key)
+            rl = ttk.Label(editor, text=right_label)
+            rl.grid(row=erow, column=2, sticky="w", pady=2)
+            re = ttk.Entry(editor, textvariable=self.ball_editor_vars[right_key], width=10)
+            re.grid(row=erow, column=3, sticky="ew", pady=2)
+            self._bind_field_help(rl, right_key)
+            self._bind_field_help(re, right_key)
             erow += 1
         row += 1
 
@@ -552,6 +599,16 @@ class PhysicsLabApp:
             ("stagger_scale", "Stagger Scale"),
             ("max_stagger", "Max Stagger"),
             ("stagger_drive_multiplier", "Stagger Drive Mult"),
+            ("ranged_attack_cooldown", "Ranged Cooldown"),
+            ("ranged_attack_range", "Ranged Range"),
+            ("ranged_knockback_force", "Ranged Knockback"),
+            ("ranged_damage", "Ranged Damage"),
+            ("healer_cooldown", "Healer Cooldown"),
+            ("healer_range", "Healer Range"),
+            ("healer_amount", "Healer Amount"),
+            ("projectile_speed", "Projectile Speed"),
+            ("projectile_radius", "Projectile Radius"),
+            ("projectile_lifetime", "Projectile Lifetime"),
         ]
         pairs_per_row = 4
         for col in range(pairs_per_row * 2):
@@ -643,48 +700,48 @@ class PhysicsLabApp:
         mapping: dict[str, dict[str, object]] = {
             "tank": {
                 "role": "tank",
-                "radius": 40.0,
-                "mass": 2.2,
-                "power": 1.0,
-                "hp": 220.0,
-                "max_hp": 220.0,
-                "vx": 160.0,
+                "radius": 42.0,
+                "mass": 2.8,
+                "power": 0.8,
+                "hp": 280.0,
+                "max_hp": 280.0,
+                "vx": 140.0,
             },
             "dealer": {
                 "role": "dealer",
-                "radius": 28.0,
+                "radius": 26.0,
                 "mass": 1.0,
-                "power": 1.55,
-                "hp": 120.0,
-                "max_hp": 120.0,
-                "vx": 250.0,
+                "power": 1.8,
+                "hp": 100.0,
+                "max_hp": 100.0,
+                "vx": 270.0,
             },
             "healer": {
                 "role": "healer",
-                "radius": 30.0,
-                "mass": 1.1,
-                "power": 0.95,
-                "hp": 140.0,
-                "max_hp": 140.0,
-                "vx": 210.0,
+                "radius": 28.0,
+                "mass": 1.2,
+                "power": 0.6,
+                "hp": 160.0,
+                "max_hp": 160.0,
+                "vx": 200.0,
             },
             "ranged_dealer": {
                 "role": "ranged_dealer",
-                "radius": 24.0,
-                "mass": 0.85,
-                "power": 1.45,
-                "hp": 100.0,
-                "max_hp": 100.0,
-                "vx": 230.0,
+                "radius": 22.0,
+                "mass": 0.7,
+                "power": 1.6,
+                "hp": 80.0,
+                "max_hp": 80.0,
+                "vx": 180.0,
             },
             "ranged_healer": {
                 "role": "ranged_healer",
-                "radius": 26.0,
-                "mass": 0.9,
-                "power": 1.05,
-                "hp": 120.0,
-                "max_hp": 120.0,
-                "vx": 220.0,
+                "radius": 24.0,
+                "mass": 0.75,
+                "power": 0.7,
+                "hp": 110.0,
+                "max_hp": 110.0,
+                "vx": 170.0,
             },
         }
         return mapping.get(preset)
@@ -1508,6 +1565,16 @@ class PhysicsLabApp:
             stagger_scale=float(self.vars["stagger_scale"].get()),
             max_stagger=float(self.vars["max_stagger"].get()),
             stagger_drive_multiplier=float(self.vars["stagger_drive_multiplier"].get()),
+            ranged_attack_cooldown=float(self.vars["ranged_attack_cooldown"].get()),
+            ranged_attack_range=float(self.vars["ranged_attack_range"].get()),
+            ranged_knockback_force=float(self.vars["ranged_knockback_force"].get()),
+            ranged_damage=float(self.vars["ranged_damage"].get()),
+            healer_cooldown=float(self.vars["healer_cooldown"].get()),
+            healer_range=float(self.vars["healer_range"].get()),
+            healer_amount=float(self.vars["healer_amount"].get()),
+            projectile_speed=float(self.vars["projectile_speed"].get()),
+            projectile_radius=float(self.vars["projectile_radius"].get()),
+            projectile_lifetime=float(self.vars["projectile_lifetime"].get()),
         )
 
     def _create_world(self) -> PhysicsWorld:
@@ -1835,23 +1902,49 @@ class PhysicsLabApp:
     def _check_battle_end(self) -> None:
         if self.battle_over:
             return
-        alive = self._alive_bodies()
-        if len(alive) > 1:
+        teams_alive: set[str] = set()
+        for body in self.world.bodies:
+            if body.is_alive:
+                teams_alive.add(body.team)
+        if len(teams_alive) > 1:
             return
 
-        left_alive = sum(1 for body in self.world.bodies if body.team == "left" and body.is_alive)
-        right_alive = sum(1 for body in self.world.bodies if body.team == "right" and body.is_alive)
-        left_hp = sum(body.hp for body in self.world.bodies if body.team == "left")
-        right_hp = sum(body.hp for body in self.world.bodies if body.team == "right")
-        if len(alive) == 0:
-            winner_text = "전멸 무승부"
+        left_bodies = [b for b in self.world.bodies if b.team == "left"]
+        right_bodies = [b for b in self.world.bodies if b.team == "right"]
+        left_alive = sum(1 for b in left_bodies if b.is_alive)
+        right_alive = sum(1 for b in right_bodies if b.is_alive)
+        left_hp = sum(b.hp for b in left_bodies)
+        right_hp = sum(b.hp for b in right_bodies)
+        left_total = len(left_bodies)
+        right_total = len(right_bodies)
+        left_max_hp = sum(b.max_hp for b in left_bodies)
+        right_max_hp = sum(b.max_hp for b in right_bodies)
+
+        if len(teams_alive) == 0:
+            winner_text = "무승부 (전멸)"
         else:
-            winner_text = f"{alive[0].team.upper()} 승리"
+            winner_team = next(iter(teams_alive))
+            winner_text = f"{'LEFT' if winner_team == 'left' else 'RIGHT'} 팀 승리!"
+
+        elapsed = self.world.time_elapsed
+        minutes = int(elapsed // 60)
+        seconds = elapsed % 60
+        time_str = f"{minutes}분 {seconds:.1f}초" if minutes > 0 else f"{seconds:.1f}초"
+
         self.battle_report_text = (
-            f"{winner_text}\n"
-            f"time={self.world.time_elapsed:.2f}s collisions={self.world.total_collisions}\n"
-            f"L alive={left_alive} hp={left_hp:.1f} | R alive={right_alive} hp={right_hp:.1f}\n"
-            "클릭하면 다시 시작"
+            f"{'=' * 28}\n"
+            f"  {winner_text}\n"
+            f"{'=' * 28}\n"
+            f"\n"
+            f"  경과 시간: {time_str}\n"
+            f"  총 충돌: {self.world.total_collisions}회\n"
+            f"\n"
+            f"  LEFT   생존 {left_alive}/{left_total}"
+            f"   HP {left_hp:.0f}/{left_max_hp:.0f}\n"
+            f"  RIGHT  생존 {right_alive}/{right_total}"
+            f"   HP {right_hp:.0f}/{right_max_hp:.0f}\n"
+            f"\n"
+            f"  클릭하면 다시 시작"
         )
         self.battle_over = True
         self.paused = True
@@ -1924,6 +2017,23 @@ class PhysicsLabApp:
         )
         self.status_var.set(f"{self.status_message}\n{live}")
 
+    @staticmethod
+    def _blend_color(base: str, target: str, ratio: float) -> str:
+        ratio = max(0.0, min(1.0, ratio))
+        try:
+            br = int(base[1:3], 16)
+            bg = int(base[3:5], 16)
+            bb = int(base[5:7], 16)
+            tr = int(target[1:3], 16)
+            tg = int(target[3:5], 16)
+            tb = int(target[5:7], 16)
+        except (ValueError, IndexError):
+            return base
+        r = int(br + (tr - br) * ratio)
+        g = int(bg + (tg - bg) * ratio)
+        b = int(bb + (tb - bb) * ratio)
+        return f"#{min(255,r):02x}{min(255,g):02x}{min(255,b):02x}"
+
     def _draw_world(self) -> None:
         self.canvas.delete("all")
 
@@ -1964,16 +2074,46 @@ class PhysicsLabApp:
 
         for body in self.world.bodies:
             r = body.radius
-            fill = body.color if body.is_alive else "#777777"
+            if not body.is_alive:
+                fill = "#555555"
+                outline_color = "#333333"
+                outline_w = 2
+            elif body.heal_flash_timer > 0 and body.hit_flash_timer <= 0:
+                heal_ratio = min(1.0, body.heal_flash_timer / 0.20)
+                fill = self._blend_color(body.color, "#66ffaa", heal_ratio * 0.6)
+                outline_color = "#66ffaa"
+                outline_w = 3
+            elif body.hit_flash_timer > 0:
+                flash_ratio = min(1.0, body.hit_flash_timer / 0.15)
+                fill = self._blend_color(body.color, "#ffffff", flash_ratio)
+                outline_color = "#ffffff"
+                outline_w = 3
+            else:
+                fill = body.color
+                outline_color = "#0a0a0a"
+                outline_w = 2
             self.canvas.create_oval(
                 body.x - r,
                 body.y - r,
                 body.x + r,
                 body.y + r,
                 fill=fill,
-                outline="#0a0a0a",
-                width=2,
+                outline=outline_color,
+                width=outline_w,
             )
+            if body.is_alive and body.heal_flash_timer > 0:
+                glow_ratio = min(1.0, body.heal_flash_timer / 0.20)
+                glow_r = r + 4 + glow_ratio * 3
+                self.canvas.create_oval(
+                    body.x - glow_r,
+                    body.y - glow_r,
+                    body.x + glow_r,
+                    body.y + glow_r,
+                    fill="",
+                    outline="#66ffaa",
+                    width=2,
+                    dash=(4, 3),
+                )
             self.canvas.create_line(
                 body.x,
                 body.y,
@@ -1984,6 +2124,7 @@ class PhysicsLabApp:
             )
 
             hp_ratio = 0.0 if body.max_hp <= 0 else max(0.0, min(1.0, body.hp / body.max_hp))
+            ghost_ratio = 0.0 if body.max_hp <= 0 else max(0.0, min(1.0, body.ghost_hp / body.max_hp))
             bar_w = max(28.0, r * 2.0)
             bar_h = 7.0
             bar_x0 = body.x - (bar_w * 0.5)
@@ -1997,6 +2138,15 @@ class PhysicsLabApp:
                 outline="#111820",
                 width=1,
             )
+            if ghost_ratio > hp_ratio:
+                self.canvas.create_rectangle(
+                    bar_x0,
+                    bar_y0,
+                    bar_x0 + (bar_w * ghost_ratio),
+                    bar_y0 + bar_h,
+                    fill="#cc3333",
+                    outline="",
+                )
             self.canvas.create_rectangle(
                 bar_x0,
                 bar_y0,
@@ -2014,6 +2164,27 @@ class PhysicsLabApp:
                 font=("Consolas", 10),
             )
 
+        for proj in self.world.projectiles:
+            pr = proj.radius
+            self.canvas.create_oval(
+                proj.x - pr,
+                proj.y - pr,
+                proj.x + pr,
+                proj.y + pr,
+                fill=proj.color,
+                outline="#ffffff",
+                width=1,
+            )
+            trail_len = 0.06
+            self.canvas.create_line(
+                proj.x,
+                proj.y,
+                proj.x - proj.vx * trail_len,
+                proj.y - proj.vy * trail_len,
+                fill=proj.color,
+                width=2,
+            )
+
         self.canvas.create_text(
             14,
             14,
@@ -2028,8 +2199,8 @@ class PhysicsLabApp:
         )
 
         if self.battle_over:
-            panel_w = 520
-            panel_h = 180
+            panel_w = 560
+            panel_h = 260
             x0 = (self.canvas_width - panel_w) * 0.5
             y0 = (self.canvas_height - panel_h) * 0.5
             self.canvas.create_rectangle(

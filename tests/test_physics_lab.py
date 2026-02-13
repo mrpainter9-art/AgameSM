@@ -503,7 +503,7 @@ class PhysicsLabTests(unittest.TestCase):
         self.assertAlmostEqual(50.0, left_a.x, places=6)
         self.assertAlmostEqual(54.0, left_b.x, places=6)
 
-    def test_dead_ball_does_not_move_or_collide(self) -> None:
+    def test_dead_ball_does_not_collide_but_falls(self) -> None:
         tuning = PhysicsTuning(
             gravity=900.0,
             approach_force=300.0,
@@ -522,8 +522,8 @@ class PhysicsLabTests(unittest.TestCase):
             team="left",
             x=120.0,
             y=70.0,
-            vx=80.0,
-            vy=-20.0,
+            vx=0.0,
+            vy=0.0,
             radius=12.0,
             mass=1.0,
             color="#4aa3ff",
@@ -548,14 +548,20 @@ class PhysicsLabTests(unittest.TestCase):
             forward_dir=-1.0,
         )
         world = PhysicsWorld(width=400.0, height=200.0, bodies=[dead, alive], tuning=tuning)
+        ground_y = world.height - dead.radius
 
-        dead_x = dead.x
-        dead_y = dead.y
         world.step(0.02)
 
+        # Dead ball should not cause collisions
         self.assertEqual(0, world.last_step_collisions)
-        self.assertAlmostEqual(dead_x, dead.x, places=6)
-        self.assertAlmostEqual(dead_y, dead.y, places=6)
+        # Dead ball falls with gravity (y increases toward ground)
+        self.assertGreater(dead.y, 70.0)
+
+        # Step until the dead ball reaches the ground
+        for _ in range(200):
+            world.step(0.02)
+
+        self.assertAlmostEqual(dead.y, ground_y, places=1)
         self.assertEqual(0.0, dead.vx)
         self.assertEqual(0.0, dead.vy)
 
@@ -604,7 +610,13 @@ class PhysicsLabTests(unittest.TestCase):
         )
         world = PhysicsWorld(width=600.0, height=200.0, bodies=[ranged, target], tuning=tuning)
 
+        # First step spawns the projectile
         world.step(0.02)
+        self.assertEqual(len(world.projectiles), 1, "projectile should be spawned")
+
+        # Step until projectile reaches the target (~140px at 600px/s ≈ 0.24s)
+        for _ in range(20):
+            world.step(0.02)
 
         self.assertGreater(target.vx, 0.0)
         self.assertLess(target.hp, target.max_hp)

@@ -41,7 +41,17 @@
     "stagger_base": 0.09,
     "stagger_scale": 0.0012,
     "max_stagger": 1.2,
-    "stagger_drive_multiplier": 0.0
+    "stagger_drive_multiplier": 0.0,
+    "ranged_attack_cooldown": 1.0,
+    "ranged_attack_range": 520.0,
+    "ranged_knockback_force": 240.0,
+    "ranged_damage": 5.5,
+    "healer_cooldown": 1.2,
+    "healer_range": 360.0,
+    "healer_amount": 10.0,
+    "projectile_speed": 600.0,
+    "projectile_radius": 5.0,
+    "projectile_lifetime": 2.0
   },
   "locks": {
     "balls_per_side": false,
@@ -84,7 +94,17 @@
     "stagger_base": false,
     "stagger_scale": false,
     "max_stagger": false,
-    "stagger_drive_multiplier": false
+    "stagger_drive_multiplier": false,
+    "ranged_attack_cooldown": false,
+    "ranged_attack_range": false,
+    "ranged_knockback_force": false,
+    "ranged_damage": false,
+    "healer_cooldown": false,
+    "healer_range": false,
+    "healer_amount": false,
+    "projectile_speed": false,
+    "projectile_radius": false,
+    "projectile_lifetime": false
   },
   "ball_specs": [
     {
@@ -135,6 +155,36 @@
     {
       "team": "left",
       "role": "ranged_dealer",
+      "radius": 24.0,
+      "mass": 0.9,
+      "power": 2.0,
+      "hp": 110.0,
+      "max_hp": 110.0,
+      "vx": 280.0,
+      "vy": 0.0,
+      "forward_dir": 1.0,
+      "color": "#4aa3ff",
+      "x": null,
+      "y": null
+    },
+    {
+      "team": "right",
+      "role": "ranged_healer",
+      "radius": 24.0,
+      "mass": 0.9,
+      "power": 1.1,
+      "hp": 110.0,
+      "max_hp": 110.0,
+      "vx": -280.0,
+      "vy": 0.0,
+      "forward_dir": -1.0,
+      "color": "#f26b5e",
+      "x": null,
+      "y": null
+    },
+    {
+      "team": "left",
+      "role": "tank",
       "radius": 24.0,
       "mass": 0.9,
       "power": 1.1,
