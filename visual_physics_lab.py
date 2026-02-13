@@ -226,6 +226,8 @@ class PhysicsLabApp:
         self.ball_tree_editor_item: str | None = None
         self.ball_tree_editor_column: str | None = None
         self.template_listbox: tk.Listbox | None = None
+        self._loading_editor_spec = False
+        self._syncing_editor_team = False
         self.ball_editor_vars: dict[str, tk.Variable] = {
             "team": tk.StringVar(value="left"),
             "role": tk.StringVar(value="dealer"),
@@ -241,6 +243,9 @@ class PhysicsLabApp:
             "x": tk.StringVar(value=""),
             "y": tk.StringVar(value=""),
         }
+        team_var = self.ball_editor_vars["team"]
+        if isinstance(team_var, tk.StringVar):
+            team_var.trace_add("write", self._on_editor_team_changed)
         self.template_name_var = tk.StringVar(value="")
         self.ball_specs = self._default_ball_specs()
         self.settings_path = Path(__file__).resolve().with_name(SETTINGS_FILE_NAME)
@@ -384,7 +389,7 @@ class PhysicsLabApp:
 
         editor = ttk.LabelFrame(controls, text="Ball Editor", padding=(8, 6))
         editor.grid(row=row, column=0, columnspan=2, sticky="ew")
-        editor.columnconfigure(1, weight=1)
+        editor.columnconfigure(1, weight=1, minsize=96)
         editor.columnconfigure(3, weight=1)
         erow = 0
 
@@ -410,15 +415,25 @@ class PhysicsLabApp:
             row=erow, column=1, sticky="ew", pady=2, padx=(0, 8)
         )
         ttk.Label(editor, text="Preset").grid(row=erow, column=2, sticky="w", pady=2)
+        ttk.Label(editor, text="Class quick apply").grid(row=erow, column=3, sticky="w", pady=2)
+        erow += 1
         preset_row = ttk.Frame(editor)
-        preset_row.grid(row=erow, column=3, sticky="ew", pady=2)
-        for p in ("tank", "dealer", "healer", "ranged_dealer", "ranged_healer"):
+        preset_row.grid(row=erow, column=0, columnspan=4, sticky="ew", pady=(0, 4))
+        for col in range(3):
+            preset_row.columnconfigure(col, weight=1)
+        preset_names = ("tank", "dealer", "healer", "ranged_dealer", "ranged_healer")
+        for idx, p in enumerate(preset_names):
             ttk.Button(
                 preset_row,
                 text=p,
                 command=lambda name=p: self.apply_class_preset(name),
-                width=9,
-            ).pack(side="left", padx=(0, 2))
+            ).grid(
+                row=(idx // 3),
+                column=(idx % 3),
+                sticky="ew",
+                padx=(0, 4),
+                pady=2,
+            )
         erow += 1
 
         for left_key, left_label, right_key, right_label in [
@@ -571,6 +586,50 @@ class PhysicsLabApp:
             return "#f26b5e"
         return "#dce6f2"
 
+    def _normalize_team(self, raw: object, *, fallback: str = "left") -> str:
+        team = str(raw).strip().lower()
+        if team in {"left", "player", "ally", "blue", "l"}:
+            return "left"
+        if team in {"right", "monster", "enemy", "red", "r"}:
+            return "right"
+        return fallback
+
+    def _on_editor_team_changed(self, *_: object) -> None:
+        if self._loading_editor_spec or self._syncing_editor_team:
+            return
+
+        self._syncing_editor_team = True
+        try:
+            team_var = self.ball_editor_vars["team"]
+            team = self._normalize_team(team_var.get(), fallback="left")
+            team_var.set(team)
+
+            own_default = self._team_default_color(team)
+            opposite = "right" if team == "left" else "left"
+            opposite_default = self._team_default_color(opposite)
+            color_var = self.ball_editor_vars["color"]
+            color_text = str(color_var.get()).strip().lower()
+            if color_text == "" or color_text == opposite_default.lower():
+                color_var.set(own_default)
+
+            vx_var = self.ball_editor_vars["vx"]
+            try:
+                vx_mag = abs(float(vx_var.get()))
+            except (TypeError, ValueError, tk.TclError):
+                vx_mag = 0.0
+            vx_var.set(vx_mag if team == "left" else -vx_mag)
+
+            forward_var = self.ball_editor_vars["forward_dir"]
+            try:
+                forward_mag = abs(float(forward_var.get()))
+            except (TypeError, ValueError, tk.TclError):
+                forward_mag = 1.0
+            if forward_mag <= 1e-6:
+                forward_mag = 1.0
+            forward_var.set(forward_mag if team == "left" else -forward_mag)
+        finally:
+            self._syncing_editor_team = False
+
     def _role_options(self) -> tuple[str, ...]:
         return ("tank", "dealer", "healer", "ranged_dealer", "ranged_healer")
 
@@ -637,7 +696,7 @@ class PhysicsLabApp:
         for key, value in payload.items():
             if key in self.ball_editor_vars:
                 self.ball_editor_vars[key].set(value)
-        team = str(self.ball_editor_vars["team"].get()).strip().lower()
+        team = self._normalize_team(self.ball_editor_vars["team"].get(), fallback="left")
         if team == "right":
             vx = abs(float(self.ball_editor_vars["vx"].get()))
             self.ball_editor_vars["vx"].set(-vx)
@@ -656,7 +715,10 @@ class PhysicsLabApp:
         return float(text)
 
     def _normalize_ball_spec(self, raw: dict[str, object], idx: int) -> dict[str, object]:
-        team = str(raw.get("team", "left")).strip().lower() or "left"
+        team = self._normalize_team(
+            raw.get("team", "left"),
+            fallback=("left" if (idx % 2) == 0 else "right"),
+        )
         role = self._normalize_role(raw.get("role", "dealer"))
         radius = float(raw.get("radius", 32.0))
         mass = float(raw.get("mass", 1.0))
@@ -682,10 +744,25 @@ class PhysicsLabApp:
             vx = -abs(float(self.vars["right_speed"].get()))
         else:
             vx = 0.0
+        if team == "left":
+            vx = abs(vx)
+        elif team == "right":
+            vx = -abs(vx)
         vy = float(raw.get("vy", 0.0))
-        default_forward = 1.0 if team == "left" else (-1.0 if team == "right" else 0.0)
-        forward_dir = float(raw.get("forward_dir", default_forward))
-        color = str(raw.get("color", self._team_default_color(team)))
+        forward_mag = abs(float(raw.get("forward_dir", 1.0)))
+        if forward_mag <= 1e-6:
+            forward_mag = 1.0
+        forward_dir = forward_mag if team == "left" else -forward_mag
+        color = str(raw.get("color", self._team_default_color(team))).strip()
+        if not color:
+            color = self._team_default_color(team)
+        left_default = self._team_default_color("left").lower()
+        right_default = self._team_default_color("right").lower()
+        color_lower = color.lower()
+        if team == "left" and color_lower == right_default:
+            color = self._team_default_color("left")
+        elif team == "right" and color_lower == left_default:
+            color = self._team_default_color("right")
         x = self._optional_float(raw.get("x"))
         y = self._optional_float(raw.get("y"))
         return {
@@ -883,21 +960,25 @@ class PhysicsLabApp:
         self._save_settings_to_disk(silent=True)
 
     def _load_editor_from_spec(self, spec: dict[str, object]) -> None:
-        self.ball_editor_vars["team"].set(str(spec["team"]))
-        self.ball_editor_vars["role"].set(self._normalize_role(spec.get("role", "dealer")))
-        self.ball_editor_vars["radius"].set(float(spec["radius"]))
-        self.ball_editor_vars["mass"].set(float(spec["mass"]))
-        self.ball_editor_vars["power"].set(float(spec["power"]))
-        self.ball_editor_vars["hp"].set(float(spec["hp"]))
-        self.ball_editor_vars["max_hp"].set(float(spec["max_hp"]))
-        self.ball_editor_vars["vx"].set(float(spec["vx"]))
-        self.ball_editor_vars["vy"].set(float(spec["vy"]))
-        self.ball_editor_vars["forward_dir"].set(float(spec["forward_dir"]))
-        self.ball_editor_vars["color"].set(str(spec["color"]))
-        x = spec.get("x")
-        y = spec.get("y")
-        self.ball_editor_vars["x"].set("" if x is None else f"{float(x):.1f}")
-        self.ball_editor_vars["y"].set("" if y is None else f"{float(y):.1f}")
+        self._loading_editor_spec = True
+        try:
+            self.ball_editor_vars["team"].set(str(spec["team"]))
+            self.ball_editor_vars["role"].set(self._normalize_role(spec.get("role", "dealer")))
+            self.ball_editor_vars["radius"].set(float(spec["radius"]))
+            self.ball_editor_vars["mass"].set(float(spec["mass"]))
+            self.ball_editor_vars["power"].set(float(spec["power"]))
+            self.ball_editor_vars["hp"].set(float(spec["hp"]))
+            self.ball_editor_vars["max_hp"].set(float(spec["max_hp"]))
+            self.ball_editor_vars["vx"].set(float(spec["vx"]))
+            self.ball_editor_vars["vy"].set(float(spec["vy"]))
+            self.ball_editor_vars["forward_dir"].set(float(spec["forward_dir"]))
+            self.ball_editor_vars["color"].set(str(spec["color"]))
+            x = spec.get("x")
+            y = spec.get("y")
+            self.ball_editor_vars["x"].set("" if x is None else f"{float(x):.1f}")
+            self.ball_editor_vars["y"].set("" if y is None else f"{float(y):.1f}")
+        finally:
+            self._loading_editor_spec = False
 
     def _ball_spec_from_editor(self) -> dict[str, object]:
         raw: dict[str, object] = {
@@ -1465,9 +1546,10 @@ class PhysicsLabApp:
             if not isinstance(raw_ball, dict):
                 raise ValueError(f"`balls[{idx}]` must be an object.")
 
-            team = str(raw_ball.get("team", "left")).strip().lower()
-            if not team:
-                raise ValueError(f"`balls[{idx}].team` is required.")
+            team = self._normalize_team(
+                raw_ball.get("team", "left"),
+                fallback=("left" if (idx % 2) == 0 else "right"),
+            )
             role = self._normalize_role(raw_ball.get("role", "dealer"))
 
             radius = float(raw_ball.get("radius", 32.0))
@@ -1497,7 +1579,16 @@ class PhysicsLabApp:
                 vx = -right_speed
             else:
                 vx = 0.0
+            if team == "left":
+                vx = abs(vx)
+            elif team == "right":
+                vx = -abs(vx)
             vy = float(raw_ball.get("vy", 0.0))
+
+            forward_mag = abs(float(raw_ball.get("forward_dir", 1.0)))
+            if forward_mag <= 1e-6:
+                forward_mag = 1.0
+            forward_dir = forward_mag if team == "left" else -forward_mag
 
             slot = team_slots[team]
             team_slots[team] += 1
@@ -1526,7 +1617,13 @@ class PhysicsLabApp:
                 default_color = "#f26b5e"
             else:
                 default_color = "#dce6f2"
-            color = str(raw_ball.get("color", default_color))
+            color = str(raw_ball.get("color", default_color)).strip()
+            if not color:
+                color = default_color
+            if team == "left" and color.lower() == "#f26b5e":
+                color = "#4aa3ff"
+            elif team == "right" and color.lower() == "#4aa3ff":
+                color = "#f26b5e"
 
             bodies.append(
                 PhysicsBody(
