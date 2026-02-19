@@ -6,30 +6,6 @@ import random
 
 
 @dataclass(slots=True)
-class Projectile:
-    """발사체 (원거리 공격용)"""
-    projectile_id: int
-    owner_team: str
-    x: float
-    y: float
-    vx: float
-    vy: float
-    radius: float = 6.0
-    damage: float = 5.0
-    lifetime: float = 3.0
-    age: float = 0.0
-    active: bool = True
-
-    def update(self, dt: float) -> None:
-        """발사체 위치 업데이트"""
-        self.x += self.vx * dt
-        self.y += self.vy * dt
-        self.age += dt
-        if self.age >= self.lifetime:
-            self.active = False
-
-
-@dataclass(slots=True)
 class PhysicsBody:
     body_id: int
     team: str
@@ -494,6 +470,8 @@ class PhysicsWorld:
     last_step_collisions: int = 0
     active_contacts: set[tuple[int, int]] = field(default_factory=set)
     invincible_teams: set[str] = field(default_factory=set)
+    projectiles: list[Projectile] = field(default_factory=list)
+    next_proj_id: int = 0
 
     def __post_init__(self) -> None:
         if self.width <= 0 or self.height <= 0:
@@ -576,9 +554,26 @@ class PhysicsWorld:
             on_ground = self._is_grounded(body)
             drive_force = 0.0
             if body.is_alive:
-                drive_force = self.tuning.approach_force * body.power
-                if body.stagger_timer > 0:
-                    drive_force *= self.tuning.stagger_drive_multiplier
+                should_stop = False
+                if body.role == "ranged_dealer":
+                    target = self._closest_enemy(body, self.tuning.ranged_attack_range)
+                    if target is not None:
+                        should_stop = True
+                elif body.role == "healer":
+                    support_target = self._frontline_ally(
+                        body,
+                        self._healer_effective_range(body),
+                        require_missing_hp=False,
+                    )
+                    if support_target is not None:
+                        should_stop = True
+
+                if not should_stop:
+                    drive_force = self.tuning.approach_force * body.power
+                    if body.role == "healer":
+                        drive_force *= 0.55
+                    if body.stagger_timer > 0:
+                        drive_force *= self.tuning.stagger_drive_multiplier
 
             ax = (body.forward_dir * drive_force) / body.mass
             ay = self.tuning.gravity
@@ -937,6 +932,110 @@ class PhysicsWorld:
             target.hp = max(0.0, target.hp - scaled_damage)
             target.last_damage = max(target.last_damage, scaled_damage)
 
+    def _spawn_projectile(
+        self,
+        actor: PhysicsBody,
+        target: PhysicsBody,
+        *,
+        damage: float,
+        knockback_force: float,
+        color: str | None = None,
+    ) -> None:
+        dx = target.x - actor.x
+        dy = target.y - actor.y
+        dist = math.hypot(dx, dy)
+        if dist < 1e-9:
+            nx = actor.forward_dir if abs(actor.forward_dir) > 1e-6 else 1.0
+            ny = 0.0
+        else:
+            nx = dx / dist
+            ny = dy / dist
+
+        spawn_dist = actor.radius + self.tuning.projectile_radius + 1.0
+        proj = Projectile(
+            proj_id=self.next_proj_id,
+            owner_id=actor.body_id,
+            team=actor.team,
+            x=actor.x + nx * spawn_dist,
+            y=actor.y + ny * spawn_dist,
+            vx=nx * self.tuning.projectile_speed,
+            vy=ny * self.tuning.projectile_speed,
+            radius=self.tuning.projectile_radius,
+            damage=damage,
+            knockback_force=knockback_force,
+            color=color or actor.color,
+            lifetime=self.tuning.projectile_lifetime,
+        )
+        self.projectiles.append(proj)
+        self.next_proj_id += 1
+
+    def _update_projectiles(self, dt: float) -> None:
+        remaining: list[Projectile] = []
+        for proj in self.projectiles:
+            if not proj.active:
+                continue
+
+            proj.x += proj.vx * dt
+            proj.y += proj.vy * dt
+            proj.age += dt
+
+            if proj.age >= proj.lifetime:
+                continue
+
+            if (
+                proj.x < -proj.radius
+                or proj.x > self.width + proj.radius
+                or proj.y < -proj.radius
+                or proj.y > self.height + proj.radius
+            ):
+                continue
+
+            hit_body: PhysicsBody | None = None
+            hit_dist_sq = float("inf")
+            for body in self.bodies:
+                if not body.is_alive:
+                    continue
+                if body.team == proj.team:
+                    continue
+                dx = body.x - proj.x
+                dy = body.y - proj.y
+                dist_sq = dx * dx + dy * dy
+                contact_dist = body.radius + proj.radius
+                if dist_sq <= contact_dist * contact_dist and dist_sq < hit_dist_sq:
+                    hit_body = body
+                    hit_dist_sq = dist_sq
+
+            if hit_body is not None:
+                self._apply_projectile_hit(proj, hit_body)
+                continue
+
+            remaining.append(proj)
+
+        self.projectiles = remaining
+
+    def _apply_projectile_hit(self, proj: Projectile, target: PhysicsBody) -> None:
+        if not target.is_alive:
+            return
+
+        speed = math.hypot(proj.vx, proj.vy)
+        if speed < 1e-9:
+            nx, ny = 1.0, 0.0
+        else:
+            nx, ny = proj.vx / speed, proj.vy / speed
+
+        force = proj.knockback_force
+        target.vx += nx * (force / max(1e-6, target.mass))
+        target.vy += (ny * 0.12 - 0.18) * (force / max(1e-6, target.mass))
+        target.stagger_timer = max(
+            target.stagger_timer,
+            min(self.tuning.max_stagger, self.tuning.stagger_base + 0.08),
+        )
+
+        target.hit_flash_timer = 0.15
+        if proj.damage > 0 and not self.is_team_invincible(target.team):
+            target.hp = max(0.0, target.hp - proj.damage)
+            target.last_damage = max(target.last_damage, proj.damage)
+
     def _apply_role_actions(self) -> None:
         for actor in self.bodies:
             if not actor.is_alive:
@@ -949,6 +1048,12 @@ class PhysicsWorld:
                 target = self._closest_enemy(actor, self.tuning.ranged_attack_range)
                 if target is None:
                     continue
+                self._spawn_projectile(
+                    actor,
+                    target,
+                    damage=self.tuning.ranged_damage * max(0.6, actor.power),
+                    knockback_force=self.tuning.ranged_knockback_force,
+                )
                 self._apply_ranged_knockback(
                     actor,
                     target,
