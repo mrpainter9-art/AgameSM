@@ -792,9 +792,10 @@ class PhysicsLabTests(unittest.TestCase):
             radius=10.0,
             mass=1.0,
             color="#4aa3ff",
-            power=0.7,
+            power=1.0,
             role="healer",
             forward_dir=1.0,
+            wis_stat=7.0,
         )
         low_target = PhysicsBody(
             body_id=1,
@@ -843,9 +844,10 @@ class PhysicsLabTests(unittest.TestCase):
             radius=10.0,
             mass=1.0,
             color="#4aa3ff",
-            power=1.6,
+            power=1.0,
             role="healer",
             forward_dir=1.0,
+            wis_stat=14.0,
         )
         high_target = PhysicsBody(
             body_id=11,

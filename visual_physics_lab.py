@@ -1800,6 +1800,11 @@ class PhysicsLabApp:
             elif team == "right" and color.lower() == "#4aa3ff":
                 color = "#f26b5e"
 
+            # role별 기본 쿨다운 (명시적 지정 없으면 role에서 자동 결정)
+            _ROLE_BASE_COOLDOWNS = {"healer": 1.2, "ranged_dealer": 1.0, "ranged_healer": 1.2}
+            ball_base_cooldown = float(
+                raw_ball.get("ability_cooldown", _ROLE_BASE_COOLDOWNS.get(role, 0.0))
+            )
             bodies.append(
                 PhysicsBody(
                     body_id=idx,
@@ -1816,6 +1821,8 @@ class PhysicsLabApp:
                     forward_dir=forward_dir,
                     max_hp=max_hp,
                     hp=hp,
+                    speed=max(1.0, abs(vx)),          # 이동 속도 스탯
+                    base_cooldown=ball_base_cooldown,  # 스킬 쿨다운 스탯
                 )
             )
 

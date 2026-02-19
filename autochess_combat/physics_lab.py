@@ -27,6 +27,10 @@ class PhysicsBody:
     hit_flash_timer: float = 0.0
     heal_flash_timer: float = 0.0
     ghost_hp: float = -1.0
+    speed: float = 240.0        # 이동 속도 스탯 (DEX * 25에서 파생)
+    base_cooldown: float = 0.0  # 스킬 기본 쿨다운 스탯 (DEX/WIS에서 파생)
+    int_stat: float = 10.0      # INT: 원거리/마법 공격력, 사거리 결정
+    wis_stat: float = 10.0      # WIS/SPT: 치유량, 힐 사거리 결정
 
     def __post_init__(self) -> None:
         if self.radius <= 0:
@@ -47,6 +51,14 @@ class PhysicsBody:
             raise ValueError("hit_flash_timer must be >= 0")
         if self.heal_flash_timer < 0:
             raise ValueError("heal_flash_timer must be >= 0")
+        if self.speed <= 0:
+            raise ValueError("speed must be > 0")
+        if self.base_cooldown < 0:
+            raise ValueError("base_cooldown must be >= 0")
+        if self.int_stat <= 0:
+            raise ValueError("int_stat must be > 0")
+        if self.wis_stat <= 0:
+            raise ValueError("wis_stat must be > 0")
         if self.hp > self.max_hp:
             self.hp = self.max_hp
         if self.ghost_hp < 0:
@@ -826,6 +838,26 @@ class PhysicsWorld:
     def _clamp(value: float, low: float, high: float) -> float:
         return max(low, min(high, value))
 
+    def _rpg_stat_factor(
+        self,
+        body: PhysicsBody,
+        *,
+        str_exp: float = 0.0,
+        int_exp: float = 0.0,
+        vit_exp: float = 0.0,
+        wis_exp: float = 0.0,
+        min_scale: float = 0.5,
+        max_scale: float = 2.5,
+    ) -> float:
+        # STR는 power로 파생 (power = STR/10.0)
+        str_f = max(0.1, body.power) ** str_exp
+        # VIT는 mass로 파생 (mass = VIT/10.0)
+        vit_f = max(0.1, body.mass) ** vit_exp
+        # INT/WIS는 직접 필드 사용
+        int_f = (max(0.1, body.int_stat) / 10.0) ** int_exp
+        wis_f = (max(0.1, body.wis_stat) / 10.0) ** wis_exp
+        return self._clamp(str_f * vit_f * int_f * wis_f, min_scale, max_scale)
+
     def _stat_link_factor(
         self,
         body: PhysicsBody,
@@ -845,32 +877,36 @@ class PhysicsWorld:
         return self._clamp(scale, min_scale, max_scale)
 
     def _effective_drive_force(self, body: PhysicsBody) -> float:
+        # 이동력을 볼의 speed 스탯에서 직접 계산
+        # speed/240: 기준 속도(240) 대비 비율로 이동력 비례
+        speed_ratio = body.speed / 240.0
         linked = self._stat_link_factor(
             body,
-            power_exp=1.0,
             mass_exp=-0.25,
             radius_exp=0.08,
             hp_exp=0.04,
             min_scale=0.35,
             max_scale=3.0,
         )
-        return self.tuning.approach_force * linked
+        return self.tuning.approach_force * speed_ratio * linked
 
     def _ranged_effective_range(self, actor: PhysicsBody) -> float:
-        linked = self._stat_link_factor(
+        # INT가 원거리 사거리 결정 (radius는 크기 보정)
+        radius_ratio = actor.radius / 24.0
+        linked = self._rpg_stat_factor(
             actor,
-            power_exp=0.35,
-            mass_exp=0.04,
-            radius_exp=0.08,
+            int_exp=0.35,
+            vit_exp=0.04,
             min_scale=0.7,
             max_scale=2.2,
         )
-        return self.tuning.ranged_attack_range * linked
+        return self.tuning.ranged_attack_range * radius_ratio * linked
 
     def _ranged_effective_force(self, actor: PhysicsBody, base_force: float) -> float:
+        # base_force = actor.power * tuning.ranged_knockback_force (호출부에서 power 반영)
+        # power_exp 제거: power는 이미 base_force에 포함됨
         linked = self._stat_link_factor(
             actor,
-            power_exp=0.65,
             mass_exp=0.10,
             radius_exp=0.06,
             min_scale=0.55,
@@ -879,11 +915,11 @@ class PhysicsWorld:
         return base_force * linked
 
     def _ranged_effective_damage(self, actor: PhysicsBody, base_damage: float) -> float:
-        linked = self._stat_link_factor(
+        # base_damage = (int_stat/10) * tuning.ranged_damage (호출부에서 INT 반영)
+        # VIT 보정만 적용 (INT는 이미 base_damage에 포함됨)
+        linked = self._rpg_stat_factor(
             actor,
-            power_exp=1.0,
-            mass_exp=0.08,
-            hp_exp=0.05,
+            vit_exp=0.08,
             min_scale=0.55,
             max_scale=2.8,
         )
@@ -927,11 +963,11 @@ class PhysicsWorld:
         *,
         base_multiplier: float,
     ) -> float:
-        actor_scale = self._stat_link_factor(
+        # WIS가 힐량 결정 (power 대신 wis_stat 직접 사용)
+        linked = self._rpg_stat_factor(
             actor,
-            power_exp=0.60,
-            mass_exp=-0.06,
-            hp_exp=0.08,
+            wis_exp=1.0,
+            vit_exp=-0.06,
             min_scale=0.55,
             max_scale=2.3,
         )
@@ -940,7 +976,7 @@ class PhysicsWorld:
         else:
             missing_ratio = 0.0
         need_scale = 0.85 + (missing_ratio * 0.35)
-        return self.tuning.healer_amount * base_multiplier * actor_scale * need_scale
+        return self.tuning.healer_amount * base_multiplier * linked * need_scale
 
     def _effective_ability_cooldown(self, base_cooldown: float, actor: PhysicsBody) -> float:
         speed_scale = self._stat_link_factor(
@@ -954,13 +990,11 @@ class PhysicsWorld:
         return base_cooldown / speed_scale
 
     def _healer_effective_range(self, actor: PhysicsBody) -> float:
-        # Healer support range follows actor stats so support class identity comes from body setup.
-        linked = self._stat_link_factor(
+        # WIS가 힐 사거리 결정
+        linked = self._rpg_stat_factor(
             actor,
-            power_exp=1.0,
-            mass_exp=0.05,
-            radius_exp=0.06,
-            hp_exp=0.06,
+            wis_exp=0.50,
+            vit_exp=0.18,
             min_scale=0.6,
             max_scale=1.9,
         )
@@ -1189,20 +1223,24 @@ class PhysicsWorld:
                 target = self._closest_enemy(actor, self._ranged_effective_range(actor))
                 if target is None:
                     continue
+                # INT 기반 원거리 데미지, STR(power) 기반 넉백 힘
+                base_dmg = (actor.int_stat / 10.0) * self.tuning.ranged_damage
+                base_force = actor.power * self.tuning.ranged_knockback_force
                 self._spawn_projectile(
                     actor,
                     target,
-                    damage=self.tuning.ranged_damage,
-                    knockback_force=self.tuning.ranged_knockback_force,
+                    damage=base_dmg,
+                    knockback_force=base_force,
                 )
                 self._apply_ranged_knockback(
                     actor,
                     target,
-                    force=self.tuning.ranged_knockback_force,
-                    damage=self.tuning.ranged_damage,
+                    force=base_force,
+                    damage=base_dmg,
                 )
+                # base_cooldown 스탯에서 쿨다운 결정
                 actor.ability_cooldown = self._effective_ability_cooldown(
-                    self.tuning.ranged_attack_cooldown,
+                    actor.base_cooldown,
                     actor,
                 )
             elif role == "healer":
@@ -1216,8 +1254,9 @@ class PhysicsWorld:
                 heal = self._effective_heal_amount(actor, target, base_multiplier=0.8)
                 target.hp = min(target.max_hp, target.hp + heal)
                 target.heal_flash_timer = 0.20
+                # base_cooldown 스탯에서 쿨다운 결정
                 actor.ability_cooldown = self._effective_ability_cooldown(
-                    self.tuning.healer_cooldown,
+                    actor.base_cooldown,
                     actor,
                 )
             elif role == "ranged_healer":
@@ -1229,16 +1268,19 @@ class PhysicsWorld:
                     acted = True
                 push_target = self._closest_enemy(actor, self._ranged_effective_range(actor) * 0.9)
                 if push_target is not None:
+                    # power 스탯에서 힘 직접 계산
+                    base_force = actor.power * self.tuning.ranged_knockback_force
                     self._apply_ranged_knockback(
                         actor,
                         push_target,
-                        force=self.tuning.ranged_knockback_force * 0.58,
+                        force=base_force * 0.58,
                         damage=0.0,
                     )
                     acted = True
                 if acted:
+                    # base_cooldown 스탯에서 쿨다운 결정
                     actor.ability_cooldown = self._effective_ability_cooldown(
-                        self.tuning.healer_cooldown,
+                        actor.base_cooldown,
                         actor,
                     )
 
@@ -1298,6 +1340,8 @@ def create_duel_world(
                 forward_dir=1.0,
                 max_hp=max(1.0, left_hp),
                 hp=max(0.0, left_hp),
+                speed=max(1.0, abs(left_initial_speed)),
+                base_cooldown=0.0,
             )
         )
         bodies.append(
@@ -1315,6 +1359,8 @@ def create_duel_world(
                 forward_dir=-1.0,
                 max_hp=max(1.0, right_hp),
                 hp=max(0.0, right_hp),
+                speed=max(1.0, abs(right_initial_speed)),
+                base_cooldown=0.0,
             )
         )
 
@@ -1444,6 +1490,8 @@ def _spawn_team(
                 forward_dir=toward_center,
                 max_hp=100.0,
                 hp=100.0,
+                speed=max(1.0, abs(vx)),
+                base_cooldown=0.0,
             )
         )
 

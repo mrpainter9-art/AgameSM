@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, fields
 import html
 import itertools
 import json
+import math
 from pathlib import Path
 import random
 from typing import Any
@@ -18,18 +19,16 @@ DEFAULT_WORLD_HEIGHT = 520.0
 
 @dataclass(frozen=True, slots=True)
 class BallClass:
-    """Ball의 기본 클래스 (역할별 기본 성능치)"""
+    """Ball의 기본 클래스 (역할별 RPG 스탯)"""
     name: str
     role: str
     description: str
-    # 기본 스탯
-    base_radius: float
-    base_mass: float
-    base_power: float
-    base_hp: float
-    base_speed: float
-    # 특수 능력
-    ability_cooldown: float = 0.0
+    # RPG 스탯 (1~20 정수, 기준=10)
+    base_str: int = 10   # STR: 물리 공격력 → power = STR/10
+    base_dex: int = 10   # DEX: 이동속도/공격속도 → speed = DEX*25
+    base_int: int = 10   # INT: 마법/원거리 공격력 → ranged_damage
+    base_vit: int = 10   # VIT: 체력/크기/질량 → mass=VIT/10, radius=28*sqrt(VIT/10), hp=VIT*10
+    base_wis: int = 10   # WIS: 치유량/힐 사거리 → healer cooldown = 12/WIS
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,45 +109,25 @@ def default_ball_classes() -> list[BallClass]:
             name="딜러",
             role="dealer",
             description="근접 공격에 특화된 공격형 유닛",
-            base_radius=28.0,
-            base_mass=1.0,
-            base_power=1.2,
-            base_hp=100.0,
-            base_speed=250.0,
-            ability_cooldown=0.0,
+            base_str=12, base_dex=10, base_int=6, base_vit=10, base_wis=4,
         ),
         BallClass(
             name="탱커",
             role="tank",
             description="높은 체력과 질량으로 전선을 유지하는 방어형 유닛",
-            base_radius=38.0,
-            base_mass=1.8,
-            base_power=0.8,
-            base_hp=180.0,
-            base_speed=180.0,
-            ability_cooldown=0.0,
+            base_str=8, base_dex=7, base_int=4, base_vit=18, base_wis=4,
         ),
         BallClass(
             name="힐러",
             role="healer",
             description="아군을 치료하는 지원형 유닛",
-            base_radius=26.0,
-            base_mass=0.8,
-            base_power=0.6,
-            base_hp=80.0,
-            base_speed=220.0,
-            ability_cooldown=1.2,
+            base_str=4, base_dex=8, base_int=5, base_vit=8, base_wis=12,
         ),
         BallClass(
             name="원거리 딜러",
             role="ranged_dealer",
             description="원거리에서 적을 공격하는 유닛",
-            base_radius=24.0,
-            base_mass=0.7,
-            base_power=1.0,
-            base_hp=70.0,
-            base_speed=200.0,
-            ability_cooldown=1.0,
+            base_str=6, base_dex=9, base_int=10, base_vit=7, base_wis=4,
         ),
     ]
 
@@ -166,21 +145,27 @@ def default_profiles() -> list[BallProfile]:
 
 
 def ball_class_to_profile(ball_class: BallClass, scale_modifier: float = 1.0) -> BallProfile:
-    """BallClass를 BallProfile로 변환 (스케일 적용)"""
-    # 기본값 대비 상대 배율 계산
-    default_radius = 32.0
-    default_mass = 1.0
-    default_power = 1.0
-    default_hp = 100.0
-    default_speed = 240.0
+    """BallClass RPG 스탯을 BallProfile 배율로 변환"""
+    # STR=VIT=DEX=10 기준값
+    default_radius = 28.0   # VIT=10 → 28*sqrt(1.0)=28
+    default_mass = 1.0      # VIT=10 → 10/10=1.0
+    default_power = 1.0     # STR=10 → 10/10=1.0
+    default_hp = 100.0      # VIT=10 → 10*10=100
+    default_speed = 250.0   # DEX=10 → 10*25=250
+
+    derived_radius = 28.0 * math.sqrt(ball_class.base_vit / 10.0)
+    derived_mass = ball_class.base_vit / 10.0
+    derived_power = ball_class.base_str / 10.0
+    derived_hp = float(ball_class.base_vit * 10)
+    derived_speed = float(ball_class.base_dex * 25)
 
     return BallProfile(
         name=ball_class.name,
-        radius_scale=(ball_class.base_radius / default_radius) * scale_modifier,
-        mass_scale=(ball_class.base_mass / default_mass) * scale_modifier,
-        power_scale=(ball_class.base_power / default_power) * scale_modifier,
-        hp_scale=(ball_class.base_hp / default_hp) * scale_modifier,
-        speed_scale=(ball_class.base_speed / default_speed) * scale_modifier,
+        radius_scale=(derived_radius / default_radius) * scale_modifier,
+        mass_scale=(derived_mass / default_mass) * scale_modifier,
+        power_scale=(derived_power / default_power) * scale_modifier,
+        hp_scale=(derived_hp / default_hp) * scale_modifier,
+        speed_scale=(derived_speed / default_speed) * scale_modifier,
     )
 
 
@@ -255,26 +240,19 @@ def _default_color_for_team(team: str) -> str:
     return "#dce6f2"
 
 
+def _cooldown_from_stats(role: str, dex: int, wis: int) -> float:
+    """RPG 스탯(DEX/WIS)으로부터 스킬 쿨다운 파생"""
+    if role == "ranged_dealer":
+        return 10.0 / max(1, dex)
+    if role in ("healer", "ranged_healer"):
+        return 12.0 / max(1, wis)
+    return 0.0
+
+
 def _normalize_ball_spec(raw: dict[str, Any], idx: int) -> dict[str, Any]:
     team = str(raw.get("team", "left")).strip().lower()
     if not team:
         raise ValueError(f"ball_specs[{idx}].team must not be empty")
-
-    radius = float(raw.get("radius", 32.0))
-    mass = float(raw.get("mass", 1.0))
-    power = float(raw.get("power", 1.0))
-    hp = float(raw.get("hp", 100.0))
-    max_hp = float(raw.get("max_hp", hp))
-    if radius <= 0:
-        raise ValueError(f"ball_specs[{idx}].radius must be > 0")
-    if mass <= 0:
-        raise ValueError(f"ball_specs[{idx}].mass must be > 0")
-    if power <= 0:
-        raise ValueError(f"ball_specs[{idx}].power must be > 0")
-    if max_hp <= 0:
-        raise ValueError(f"ball_specs[{idx}].max_hp must be > 0")
-    if hp < 0:
-        raise ValueError(f"ball_specs[{idx}].hp must be >= 0")
 
     normalized = dict(raw)
     normalized["team"] = team
@@ -282,16 +260,41 @@ def _normalize_ball_spec(raw: dict[str, Any], idx: int) -> dict[str, Any]:
     if role not in {"tank", "dealer", "healer", "ranged_dealer", "ranged_healer"}:
         role = "dealer"
     normalized["role"] = role
-    normalized["radius"] = radius
-    normalized["mass"] = mass
-    normalized["power"] = power
-    normalized["max_hp"] = max_hp
-    normalized["hp"] = min(hp, max_hp)
+
+    # RPG 스탯 읽기 (1~20, 기준=10)
+    str_s = max(1, int(raw.get("str_stat", 10)))
+    dex_s = max(1, int(raw.get("dex_stat", 10)))
+    int_s = max(1, int(raw.get("int_stat", 10)))
+    vit_s = max(1, int(raw.get("vit_stat", 10)))
+    wis_s = max(1, int(raw.get("wis_stat", 10)))
+
+    # 물리값 파생
+    normalized["power"]    = str_s / 10.0
+    normalized["mass"]     = vit_s / 10.0
+    normalized["radius"]   = 28.0 * math.sqrt(vit_s / 10.0)
+    normalized["max_hp"]   = float(vit_s * 10)
+    hp_raw = float(raw.get("hp", vit_s * 10))
+    normalized["hp"]       = min(hp_raw, normalized["max_hp"])
+    normalized["int_stat"] = float(int_s)
+    normalized["wis_stat"] = float(wis_s)
+
     normalized["forward_dir"] = float(raw.get("forward_dir", _default_forward_for_team(team)))
     normalized["color"] = str(raw.get("color", _default_color_for_team(team)))
     normalized["vy"] = float(raw.get("vy", 0.0))
     normalized["x"] = raw.get("x")
     normalized["y"] = raw.get("y")
+    # 쿨다운: DEX/WIS에서 자동 파생 (JSON에서 명시적 지정도 허용)
+    normalized["ability_cooldown"] = float(
+        raw.get("ability_cooldown", _cooldown_from_stats(role, dex_s, wis_s))
+    )
+    # vx: DEX에서 파생 (명시적 지정도 허용)
+    if "vx" not in raw:
+        if team == "left":
+            normalized["vx"] = float(dex_s) * 25.0
+        elif team == "right":
+            normalized["vx"] = -(float(dex_s) * 25.0)
+        else:
+            normalized["vx"] = 0.0
     return normalized
 
 
@@ -358,13 +361,14 @@ def _build_world_from_specs(
         x = min(width - radius, max(radius, x))
         y = min(height - radius, max(radius, y))
 
+        raw_vx = float(spec.get("vx", _default_speed_for_team(team, settings_values)))
         bodies.append(
             PhysicsBody(
                 body_id=idx,
                 team=team,
                 x=x,
                 y=y,
-                vx=float(spec.get("vx", _default_speed_for_team(team, settings_values))),
+                vx=raw_vx,
                 vy=float(spec.get("vy", 0.0)),
                 radius=radius,
                 mass=float(spec["mass"]),
@@ -374,6 +378,10 @@ def _build_world_from_specs(
                 forward_dir=float(spec["forward_dir"]),
                 max_hp=float(spec["max_hp"]),
                 hp=float(spec["hp"]),
+                speed=max(1.0, abs(raw_vx)),
+                base_cooldown=float(spec.get("ability_cooldown", 0.0)),
+                int_stat=float(spec.get("int_stat", 10.0)),
+                wis_stat=float(spec.get("wis_stat", 10.0)),
             )
         )
 
