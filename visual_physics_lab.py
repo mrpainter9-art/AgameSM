@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime
+import math
 from pathlib import Path
 import time
 import tkinter as tk
@@ -10,6 +12,7 @@ from tkinter import messagebox, ttk
 
 from autochess_combat import PhysicsTuning
 from autochess_combat.battle_sim import (
+    default_ball_classes,
     run_random_profile_sweep_from_settings_payload,
     run_profile_sweep_from_settings_payload,
     sweep_result_to_html,
@@ -109,6 +112,62 @@ CUSTOM_BALLS_TEMPLATE: dict[str, object] = {
         },
     ],
 }
+
+
+@dataclass
+class RingEffect:
+    x: float
+    y: float
+    start_radius: float
+    end_radius: float
+    color: str
+    ttl: float
+    duration: float
+    width: float
+
+
+@dataclass
+class FloatingTextEffect:
+    x: float
+    y: float
+    text: str
+    color: str
+    ttl: float
+    duration: float
+    rise_speed: float
+    drift_speed: float
+    font_size: int
+
+
+@dataclass
+class HpBarAnimState:
+    display_ratio: float
+    chip_ratio: float
+    pulse_ttl: float = 0.0
+    pulse_duration: float = 0.0
+    pulse_color: str = "#4ad06f"
+
+
+@dataclass
+class DeathParticleEffect:
+    x: float
+    y: float
+    vx: float
+    vy: float
+    radius: float
+    color: str
+    ttl: float
+    duration: float
+
+
+@dataclass
+class DeathFadeState:
+    x: float
+    y: float
+    radius: float
+    base_color: str
+    ttl: float
+    duration: float
 
 
 class HoverTooltip:
@@ -252,7 +311,16 @@ class PhysicsLabApp:
         self._load_settings_from_disk(silent=True)
 
         self.status_var = tk.StringVar(value="")
+        self._ring_effects: list[RingEffect] = []
+        self._floating_text_effects: list[FloatingTextEffect] = []
+        self._death_particles: list[DeathParticleEffect] = []
+        self._prev_hp_by_body_id: dict[int, float] = {}
+        self._prev_alive_by_body_id: dict[int, bool] = {}
+        self._hp_bar_anim_by_body_id: dict[int, HpBarAnimState] = {}
+        self._death_fade_by_body_id: dict[int, DeathFadeState] = {}
+        self._vanished_body_ids: set[int] = set()
         self.world = self._create_world()
+        self._reset_combat_vfx_state()
         self.battle_over = False
         self.battle_report_text = ""
         self._build_ui()
@@ -523,52 +591,95 @@ class PhysicsLabApp:
         self._refresh_template_list()
 
     def _build_environment_panel(self, parent: ttk.LabelFrame) -> None:
-        fields = [
-            ("side_margin", "Side Margin"),
-            ("gravity", "Gravity"),
-            ("approach_force", "Approach Force"),
-            ("restitution", "Restitution"),
-            ("wall_restitution", "Wall Restitution"),
-            ("linear_damping", "Linear Damping"),
-            ("friction", "Collision Friction"),
-            ("wall_friction", "Wall Friction"),
-            ("ground_friction", "Ground Friction"),
-            ("ground_snap_speed", "Ground Snap Speed"),
-            ("collision_boost", "Collision Boost"),
-            ("solver_passes", "Solver Passes"),
-            ("position_correction", "Position Correction"),
-            ("mass_power_impact_scale", "Mass+Power Scale"),
-            ("power_ratio_exponent", "Power Ratio Exp"),
-            ("impact_speed_cap", "Impact Speed Cap"),
-            ("min_recoil_speed", "Min Recoil Speed"),
-            ("recoil_scale", "Recoil Scale"),
-            ("min_launch_speed", "Min Launch Speed"),
-            ("launch_scale", "Launch Scale"),
-            ("launch_height_scale", "Launch Height Scale"),
-            ("max_launch_speed", "Max Launch Speed"),
-            ("damage_base", "Damage Base"),
-            ("damage_scale", "Damage Scale"),
-            ("stagger_base", "Stagger Base"),
-            ("stagger_scale", "Stagger Scale"),
-            ("max_stagger", "Max Stagger"),
-            ("stagger_drive_multiplier", "Stagger Drive Mult"),
-        ]
-        pairs_per_row = 4
-        for col in range(pairs_per_row * 2):
-            if col % 2 == 1:
-                parent.columnconfigure(col, weight=1)
+        """물리 설정을 카테고리별 탭으로 구성"""
+        # 상단에 Side Margin 표시
+        top_frame = ttk.Frame(parent)
+        top_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=(0, 8))
+        ttk.Label(top_frame, text="Side Margin").grid(row=0, column=0, sticky="w", padx=(0, 6))
+        margin_entry = ttk.Entry(top_frame, textvariable=self.vars["side_margin"], width=10)
+        margin_entry.grid(row=0, column=1, sticky="w")
+        self.value_widgets["side_margin"] = margin_entry
+        self._bind_field_help(margin_entry, "side_margin")
+        self._apply_widget_lock_state("side_margin")
 
-        for idx, (key, label) in enumerate(fields):
-            row = idx // pairs_per_row
-            col = (idx % pairs_per_row) * 2
-            label_widget = ttk.Label(parent, text=label)
-            label_widget.grid(row=row, column=col, sticky="w", padx=(0, 6), pady=2)
-            entry_widget = ttk.Entry(parent, textvariable=self.vars[key], width=10)
-            entry_widget.grid(row=row, column=col + 1, sticky="ew", padx=(0, 10), pady=2)
-            self.value_widgets[key] = entry_widget
-            self._bind_field_help(label_widget, key)
-            self._bind_field_help(entry_widget, key)
-            self._apply_widget_lock_state(key)
+        # 카테고리별 탭 생성
+        notebook = ttk.Notebook(parent)
+        notebook.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        parent.rowconfigure(1, weight=1)
+        parent.columnconfigure(0, weight=1)
+
+        # 카테고리별 필드 정의
+        categories = {
+            "기본 물리": [
+                ("gravity", "중력 (Gravity)"),
+                ("approach_force", "접근력 (Approach Force)"),
+            ],
+            "충돌 반발": [
+                ("restitution", "반발력 (Restitution)"),
+                ("wall_restitution", "벽 반발력 (Wall Restitution)"),
+                ("collision_boost", "충돌 부스트 (Collision Boost)"),
+            ],
+            "마찰": [
+                ("linear_damping", "선형 감쇠 (Linear Damping)"),
+                ("friction", "충돌 마찰 (Collision Friction)"),
+                ("wall_friction", "벽 마찰 (Wall Friction)"),
+                ("ground_friction", "지면 마찰 (Ground Friction)"),
+            ],
+            "충돌 해결": [
+                ("solver_passes", "해결 패스 (Solver Passes)"),
+                ("position_correction", "위치 보정 (Position Correction)"),
+                ("ground_snap_speed", "지면 스냅 속도 (Ground Snap Speed)"),
+            ],
+            "충돌 강도": [
+                ("mass_power_impact_scale", "질량·파워 스케일"),
+                ("power_ratio_exponent", "파워 비율 지수"),
+                ("impact_speed_cap", "임팩트 속도 상한"),
+            ],
+            "밀려남 효과": [
+                ("min_recoil_speed", "최소 밀려남 속도"),
+                ("recoil_scale", "밀려남 스케일"),
+            ],
+            "튕겨올림": [
+                ("min_launch_speed", "최소 런치 속도"),
+                ("launch_scale", "런치 스케일"),
+                ("launch_height_scale", "런치 높이 배율"),
+                ("max_launch_speed", "최대 런치 속도"),
+            ],
+            "데미지": [
+                ("damage_base", "기본 데미지"),
+                ("damage_scale", "데미지 스케일"),
+            ],
+            "경직": [
+                ("stagger_base", "기본 경직 시간"),
+                ("stagger_scale", "경직 스케일"),
+                ("max_stagger", "최대 경직"),
+                ("stagger_drive_multiplier", "경직 중 이동 배율"),
+            ],
+        }
+
+        # 각 카테고리별 탭 생성
+        for category_name, fields in categories.items():
+            tab = ttk.Frame(notebook, padding=10)
+            notebook.add(tab, text=category_name)
+
+            # 2열 레이아웃으로 필드 배치
+            tab.columnconfigure(1, weight=1)
+            tab.columnconfigure(3, weight=1)
+
+            for idx, (key, label) in enumerate(fields):
+                row = idx // 2
+                col = (idx % 2) * 2
+
+                label_widget = ttk.Label(tab, text=label)
+                label_widget.grid(row=row, column=col, sticky="w", padx=(0, 6), pady=4)
+
+                entry_widget = ttk.Entry(tab, textvariable=self.vars[key], width=12)
+                entry_widget.grid(row=row, column=col + 1, sticky="ew", padx=(0, 20), pady=4)
+
+                self.value_widgets[key] = entry_widget
+                self._bind_field_help(label_widget, key)
+                self._bind_field_help(entry_widget, key)
+                self._apply_widget_lock_state(key)
 
     def _default_ball_specs(self) -> list[dict[str, object]]:
         default_balls: list[dict[str, object]] = []
@@ -640,44 +751,14 @@ class PhysicsLabApp:
         return role
 
     def _class_preset_payload(self, preset: str) -> dict[str, object] | None:
-        mapping: dict[str, dict[str, object]] = {
-            "tank": {
-                "role": "tank",
-                "radius": 40.0,
-                "mass": 2.2,
-                "power": 1.0,
-                "hp": 220.0,
-                "max_hp": 220.0,
-                "vx": 160.0,
-            },
-            "dealer": {
-                "role": "dealer",
-                "radius": 28.0,
-                "mass": 1.0,
-                "power": 1.55,
-                "hp": 120.0,
-                "max_hp": 120.0,
-                "vx": 250.0,
-            },
-            "healer": {
-                "role": "healer",
-                "radius": 30.0,
-                "mass": 1.1,
-                "power": 0.95,
-                "hp": 140.0,
-                "max_hp": 140.0,
-                "vx": 210.0,
-            },
-            "ranged_dealer": {
-                "role": "ranged_dealer",
-                "radius": 24.0,
-                "mass": 0.85,
-                "power": 1.45,
-                "hp": 100.0,
-                "max_hp": 100.0,
-                "vx": 230.0,
-            },
-            "ranged_healer": {
+        """Ball 클래스 프리셋 가져오기 (default_ball_classes 사용)"""
+        # default_ball_classes()에서 정의된 클래스 사용
+        ball_classes = default_ball_classes()
+        class_map = {ball_class.role: ball_class for ball_class in ball_classes}
+
+        # ranged_healer는 별도 정의 (기본 클래스에 없음)
+        if preset == "ranged_healer":
+            return {
                 "role": "ranged_healer",
                 "radius": 26.0,
                 "mass": 0.9,
@@ -685,9 +766,21 @@ class PhysicsLabApp:
                 "hp": 120.0,
                 "max_hp": 120.0,
                 "vx": 220.0,
-            },
+            }
+
+        ball_class = class_map.get(preset)
+        if ball_class is None:
+            return None
+
+        return {
+            "role": ball_class.role,
+            "radius": ball_class.base_radius,
+            "mass": ball_class.base_mass,
+            "power": ball_class.base_power,
+            "hp": ball_class.base_hp,
+            "max_hp": ball_class.base_hp,
+            "vx": ball_class.base_speed,
         }
-        return mapping.get(preset)
 
     def apply_class_preset(self, preset: str) -> None:
         payload = self._class_preset_payload(preset)
@@ -1406,6 +1499,7 @@ class PhysicsLabApp:
         except ValueError as exc:
             messagebox.showerror("Invalid value", str(exc))
             return
+        self._reset_combat_vfx_state()
         self.battle_over = False
         self.battle_report_text = ""
         self.paused = False
@@ -1679,6 +1773,7 @@ class PhysicsLabApp:
             messagebox.showerror("Custom Data Error", str(exc))
             return
 
+        self._reset_combat_vfx_state()
         self.battle_over = False
         self.battle_report_text = ""
         self.paused = False
@@ -1710,6 +1805,7 @@ class PhysicsLabApp:
         except ValueError as exc:
             messagebox.showerror("Invalid value", str(exc))
             return
+        self._reset_combat_vfx_state()
         self.battle_over = False
         self.battle_report_text = ""
         self.paused = False
@@ -1832,21 +1928,324 @@ class PhysicsLabApp:
     def _alive_bodies(self) -> list[PhysicsBody]:
         return [body for body in self.world.bodies if body.is_alive]
 
+    def _reset_combat_vfx_state(self) -> None:
+        self._ring_effects.clear()
+        self._floating_text_effects.clear()
+        self._death_particles.clear()
+        self._prev_hp_by_body_id = {body.body_id: body.hp for body in self.world.bodies}
+        self._prev_alive_by_body_id = {body.body_id: body.is_alive for body in self.world.bodies}
+        self._hp_bar_anim_by_body_id = {}
+        self._death_fade_by_body_id = {}
+        self._vanished_body_ids.clear()
+        for body in self.world.bodies:
+            ratio = 0.0 if body.max_hp <= 0 else max(0.0, min(1.0, body.hp / body.max_hp))
+            self._hp_bar_anim_by_body_id[body.body_id] = HpBarAnimState(
+                display_ratio=ratio,
+                chip_ratio=ratio,
+            )
+
+    def _collect_combat_vfx_events(self) -> None:
+        active_ids: set[int] = set()
+        for body in self.world.bodies:
+            active_ids.add(body.body_id)
+            prev_hp = self._prev_hp_by_body_id.get(body.body_id, body.hp)
+            prev_alive = self._prev_alive_by_body_id.get(body.body_id, body.is_alive)
+            heal_amount = body.hp - prev_hp
+            damage_amount = max(0.0, body.last_damage)
+
+            if prev_alive and not body.is_alive:
+                self._spawn_death_vfx(body)
+            if body.is_alive:
+                self._vanished_body_ids.discard(body.body_id)
+                if body.body_id in self._death_fade_by_body_id:
+                    del self._death_fade_by_body_id[body.body_id]
+
+            if damage_amount >= 0.05:
+                self._spawn_damage_vfx(body, damage_amount)
+                self._trigger_hp_bar_pulse(body.body_id, color="#ff8f7a", duration=0.22)
+            if heal_amount >= 0.05:
+                self._spawn_heal_vfx(body, heal_amount)
+                self._trigger_hp_bar_pulse(body.body_id, color="#7cf2ad", duration=0.30)
+
+            self._prev_hp_by_body_id[body.body_id] = body.hp
+            self._prev_alive_by_body_id[body.body_id] = body.is_alive
+
+        stale_ids = [body_id for body_id in self._prev_hp_by_body_id if body_id not in active_ids]
+        for body_id in stale_ids:
+            del self._prev_hp_by_body_id[body_id]
+        stale_alive_ids = [body_id for body_id in self._prev_alive_by_body_id if body_id not in active_ids]
+        for body_id in stale_alive_ids:
+            del self._prev_alive_by_body_id[body_id]
+        stale_fade_ids = [body_id for body_id in self._death_fade_by_body_id if body_id not in active_ids]
+        for body_id in stale_fade_ids:
+            del self._death_fade_by_body_id[body_id]
+            self._vanished_body_ids.discard(body_id)
+
+    def _spawn_damage_vfx(self, body: PhysicsBody, amount: float) -> None:
+        text_offset = ((len(self._floating_text_effects) % 3) - 1) * 7.0
+        self._ring_effects.append(
+            RingEffect(
+                x=body.x,
+                y=body.y,
+                start_radius=body.radius * 0.55,
+                end_radius=body.radius * 1.65,
+                color="#ff7c66",
+                ttl=0.24,
+                duration=0.24,
+                width=3.0,
+            )
+        )
+        text_value = f"-{amount:.0f}" if amount >= 10.0 else f"-{amount:.1f}"
+        self._floating_text_effects.append(
+            FloatingTextEffect(
+                x=body.x + text_offset,
+                y=body.y - body.radius - 12.0,
+                text=text_value,
+                color="#ffb3a6",
+                ttl=0.55,
+                duration=0.55,
+                rise_speed=54.0,
+                drift_speed=0.0,
+                font_size=12,
+            )
+        )
+        self._trim_combat_vfx_buffers()
+
+    def _spawn_heal_vfx(self, body: PhysicsBody, amount: float) -> None:
+        text_offset = ((len(self._floating_text_effects) % 3) - 1) * 7.0
+        self._ring_effects.append(
+            RingEffect(
+                x=body.x,
+                y=body.y,
+                start_radius=body.radius * 0.70,
+                end_radius=body.radius * 1.45,
+                color="#52e68f",
+                ttl=0.34,
+                duration=0.34,
+                width=2.5,
+            )
+        )
+        text_value = f"+{amount:.0f}" if amount >= 10.0 else f"+{amount:.1f}"
+        self._floating_text_effects.append(
+            FloatingTextEffect(
+                x=body.x + text_offset,
+                y=body.y - body.radius - 12.0,
+                text=text_value,
+                color="#d2ffe1",
+                ttl=0.70,
+                duration=0.70,
+                rise_speed=36.0,
+                drift_speed=0.0,
+                font_size=11,
+            )
+        )
+        self._trim_combat_vfx_buffers()
+
+    def _spawn_death_vfx(self, body: PhysicsBody) -> None:
+        self._ring_effects.append(
+            RingEffect(
+                x=body.x,
+                y=body.y,
+                start_radius=body.radius * 0.65,
+                end_radius=body.radius * 2.25,
+                color="#ffd8ca",
+                ttl=0.42,
+                duration=0.42,
+                width=3.2,
+            )
+        )
+        self._ring_effects.append(
+            RingEffect(
+                x=body.x,
+                y=body.y,
+                start_radius=body.radius * 0.25,
+                end_radius=body.radius * 1.35,
+                color="#ff8e70",
+                ttl=0.28,
+                duration=0.28,
+                width=2.4,
+            )
+        )
+        self._floating_text_effects.append(
+            FloatingTextEffect(
+                x=body.x,
+                y=body.y - body.radius - 10.0,
+                text="OUT",
+                color="#ffe1d7",
+                ttl=0.52,
+                duration=0.52,
+                rise_speed=32.0,
+                drift_speed=0.0,
+                font_size=11,
+            )
+        )
+        self._death_fade_by_body_id[body.body_id] = DeathFadeState(
+            x=body.x,
+            y=body.y,
+            radius=body.radius,
+            base_color=body.color,
+            ttl=0.72,
+            duration=0.72,
+        )
+
+        particle_count = 14
+        for idx in range(particle_count):
+            angle = (math.tau * idx) / particle_count
+            speed = 82.0 + ((idx % 4) * 14.0)
+            self._death_particles.append(
+                DeathParticleEffect(
+                    x=body.x,
+                    y=body.y,
+                    vx=math.cos(angle) * speed,
+                    vy=(math.sin(angle) * speed) - 35.0,
+                    radius=max(1.6, body.radius * (0.12 + (0.02 * (idx % 3)))),
+                    color=body.color if idx % 2 == 0 else "#f2f5fa",
+                    ttl=0.44 + (0.05 * (idx % 3)),
+                    duration=0.44 + (0.05 * (idx % 3)),
+                )
+            )
+
+        self._trim_combat_vfx_buffers()
+
+    def _trim_combat_vfx_buffers(self) -> None:
+        max_rings = 240
+        max_texts = 180
+        max_death_particles = 520
+        if len(self._ring_effects) > max_rings:
+            self._ring_effects = self._ring_effects[-max_rings:]
+        if len(self._floating_text_effects) > max_texts:
+            self._floating_text_effects = self._floating_text_effects[-max_texts:]
+        if len(self._death_particles) > max_death_particles:
+            self._death_particles = self._death_particles[-max_death_particles:]
+
+    @staticmethod
+    def _smooth_follow(current: float, target: float, speed: float, dt: float) -> float:
+        if dt <= 0.0:
+            return current
+        alpha = max(0.0, min(1.0, speed * dt))
+        return current + ((target - current) * alpha)
+
+    def _ensure_hp_bar_anim_state(self, body: PhysicsBody) -> HpBarAnimState:
+        state = self._hp_bar_anim_by_body_id.get(body.body_id)
+        if state is not None:
+            return state
+        ratio = 0.0 if body.max_hp <= 0 else max(0.0, min(1.0, body.hp / body.max_hp))
+        state = HpBarAnimState(display_ratio=ratio, chip_ratio=ratio)
+        self._hp_bar_anim_by_body_id[body.body_id] = state
+        return state
+
+    def _trigger_hp_bar_pulse(self, body_id: int, *, color: str, duration: float) -> None:
+        state = self._hp_bar_anim_by_body_id.get(body_id)
+        if state is None:
+            return
+        if duration >= state.pulse_ttl:
+            state.pulse_ttl = duration
+            state.pulse_duration = duration
+            state.pulse_color = color
+
+    def _update_hp_bar_animation(self, dt: float) -> None:
+        if dt <= 0.0:
+            return
+
+        active_ids: set[int] = set()
+        for body in self.world.bodies:
+            active_ids.add(body.body_id)
+            state = self._ensure_hp_bar_anim_state(body)
+            target = 0.0 if body.max_hp <= 0 else max(0.0, min(1.0, body.hp / body.max_hp))
+
+            display_speed = 16.0 if target < state.display_ratio else 8.0
+            chip_speed = 3.8 if target < state.chip_ratio else 11.0
+
+            state.display_ratio = self._smooth_follow(
+                state.display_ratio,
+                target,
+                speed=display_speed,
+                dt=dt,
+            )
+            state.chip_ratio = self._smooth_follow(
+                state.chip_ratio,
+                target,
+                speed=chip_speed,
+                dt=dt,
+            )
+            state.display_ratio = max(0.0, min(1.0, state.display_ratio))
+            state.chip_ratio = max(0.0, min(1.0, state.chip_ratio))
+
+            if state.pulse_ttl > 0.0:
+                state.pulse_ttl = max(0.0, state.pulse_ttl - dt)
+
+        stale_ids = [body_id for body_id in self._hp_bar_anim_by_body_id if body_id not in active_ids]
+        for body_id in stale_ids:
+            del self._hp_bar_anim_by_body_id[body_id]
+
+    def _update_combat_vfx(self, dt: float) -> None:
+        if dt <= 0.0:
+            return
+
+        active_rings: list[RingEffect] = []
+        for effect in self._ring_effects:
+            effect.ttl = max(0.0, effect.ttl - dt)
+            if effect.ttl > 0.0:
+                active_rings.append(effect)
+        self._ring_effects = active_rings
+
+        active_texts: list[FloatingTextEffect] = []
+        for effect in self._floating_text_effects:
+            effect.ttl = max(0.0, effect.ttl - dt)
+            effect.y -= effect.rise_speed * dt
+            effect.x += effect.drift_speed * dt
+            if effect.ttl > 0.0:
+                active_texts.append(effect)
+        self._floating_text_effects = active_texts
+
+        active_particles: list[DeathParticleEffect] = []
+        for effect in self._death_particles:
+            effect.ttl = max(0.0, effect.ttl - dt)
+            effect.x += effect.vx * dt
+            effect.y += effect.vy * dt
+            effect.vx *= max(0.0, 1.0 - (2.8 * dt))
+            effect.vy = (effect.vy * max(0.0, 1.0 - (2.1 * dt))) + (130.0 * dt)
+            if effect.ttl > 0.0:
+                active_particles.append(effect)
+        self._death_particles = active_particles
+
+        finished_fade_ids: list[int] = []
+        for body_id, effect in self._death_fade_by_body_id.items():
+            effect.ttl = max(0.0, effect.ttl - dt)
+            if effect.ttl <= 0.0:
+                finished_fade_ids.append(body_id)
+        for body_id in finished_fade_ids:
+            del self._death_fade_by_body_id[body_id]
+            self._vanished_body_ids.add(body_id)
+
     def _check_battle_end(self) -> None:
         if self.battle_over:
             return
         alive = self._alive_bodies()
-        if len(alive) > 1:
-            return
 
+        # 한쪽 팀이 전멸했는지 확인
         left_alive = sum(1 for body in self.world.bodies if body.team == "left" and body.is_alive)
         right_alive = sum(1 for body in self.world.bodies if body.team == "right" and body.is_alive)
+
+        # 양쪽 팀이 모두 살아있으면 게임 계속
+        if left_alive > 0 and right_alive > 0:
+            return
+
         left_hp = sum(body.hp for body in self.world.bodies if body.team == "left")
         right_hp = sum(body.hp for body in self.world.bodies if body.team == "right")
-        if len(alive) == 0:
-            winner_text = "전멸 무승부"
+
+        # 승자 결정
+        if left_alive == 0 and right_alive == 0:
+            winner_text = "🤝 무승부 (전멸)"
+            winner_team = "무승부"
+        elif left_alive > 0:
+            winner_text = "🔵 LEFT 팀 승리!"
+            winner_team = "LEFT"
         else:
-            winner_text = f"{alive[0].team.upper()} 승리"
+            winner_text = "🔴 RIGHT 팀 승리!"
+            winner_team = "RIGHT"
+
+        # 전투 결과 텍스트
         self.battle_report_text = (
             f"{winner_text}\n"
             f"time={self.world.time_elapsed:.2f}s collisions={self.world.total_collisions}\n"
@@ -1857,6 +2256,16 @@ class PhysicsLabApp:
         self.paused = True
         self.status_message = "Battle finished. Click center overlay to respawn."
         self._refresh_status()
+
+        # 팝업 표시
+        result_message = (
+            f"{winner_text}\n\n"
+            f"⏱️ 경과 시간: {self.world.time_elapsed:.2f}초\n"
+            f"💥 총 충돌: {self.world.total_collisions}회\n\n"
+            f"🔵 LEFT 팀 - 생존: {left_alive}, HP: {left_hp:.1f}\n"
+            f"🔴 RIGHT 팀 - 생존: {right_alive}, HP: {right_hp:.1f}"
+        )
+        messagebox.showinfo("⚔️ 전투 종료", result_message)
 
     def _on_canvas_click(self, event: tk.Event) -> None:
         if not self.battle_over:
@@ -1880,6 +2289,8 @@ class PhysicsLabApp:
         if self.battle_over:
             return
         self.world.step(self.fixed_dt)
+        self._collect_combat_vfx_events()
+        self._update_hp_bar_animation(self.fixed_dt)
         self._check_battle_end()
         self._draw_world()
         self.status_message = "Advanced one physics tick."
@@ -1924,6 +2335,64 @@ class PhysicsLabApp:
         )
         self.status_var.set(f"{self.status_message}\n{live}")
 
+    @staticmethod
+    def _blend_hex_color(start_hex: str, end_hex: str, t: float) -> str:
+        blend = max(0.0, min(1.0, t))
+        start = start_hex.lstrip("#")
+        end = end_hex.lstrip("#")
+        if len(start) != 6 or len(end) != 6:
+            return start_hex
+        sr = int(start[0:2], 16)
+        sg = int(start[2:4], 16)
+        sb = int(start[4:6], 16)
+        er = int(end[0:2], 16)
+        eg = int(end[2:4], 16)
+        eb = int(end[4:6], 16)
+        rr = int(sr + ((er - sr) * blend))
+        rg = int(sg + ((eg - sg) * blend))
+        rb = int(sb + ((eb - sb) * blend))
+        return f"#{rr:02x}{rg:02x}{rb:02x}"
+
+    def _draw_combat_vfx(self) -> None:
+        fade_target = "#121923"
+        for effect in self._death_particles:
+            life = 0.0 if effect.duration <= 0 else max(0.0, min(1.0, effect.ttl / effect.duration))
+            radius = max(0.7, effect.radius * life)
+            fill = self._blend_hex_color(effect.color, fade_target, 1.0 - life)
+            self.canvas.create_oval(
+                effect.x - radius,
+                effect.y - radius,
+                effect.x + radius,
+                effect.y + radius,
+                fill=fill,
+                outline="",
+            )
+
+        for effect in self._ring_effects:
+            life = 0.0 if effect.duration <= 0 else max(0.0, min(1.0, effect.ttl / effect.duration))
+            progress = 1.0 - life
+            radius = effect.start_radius + ((effect.end_radius - effect.start_radius) * progress)
+            outline = self._blend_hex_color(effect.color, fade_target, 1.0 - life)
+            self.canvas.create_oval(
+                effect.x - radius,
+                effect.y - radius,
+                effect.x + radius,
+                effect.y + radius,
+                outline=outline,
+                width=max(1.0, effect.width * life),
+            )
+
+        for effect in self._floating_text_effects:
+            life = 0.0 if effect.duration <= 0 else max(0.0, min(1.0, effect.ttl / effect.duration))
+            text_color = self._blend_hex_color(effect.color, fade_target, 1.0 - life)
+            self.canvas.create_text(
+                effect.x,
+                effect.y,
+                text=effect.text,
+                fill=text_color,
+                font=("Consolas", max(8, effect.font_size), "bold"),
+            )
+
     def _draw_world(self) -> None:
         self.canvas.delete("all")
 
@@ -1963,31 +2432,65 @@ class PhysicsLabApp:
         )
 
         for body in self.world.bodies:
-            r = body.radius
-            fill = body.color if body.is_alive else "#777777"
-            self.canvas.create_oval(
-                body.x - r,
-                body.y - r,
-                body.x + r,
-                body.y + r,
-                fill=fill,
-                outline="#0a0a0a",
-                width=2,
-            )
-            self.canvas.create_line(
-                body.x,
-                body.y,
-                body.x - body.vx * 0.08,
-                body.y - body.vy * 0.08,
-                fill="#f6f7f9",
-                width=1,
-            )
+            if not body.is_alive and body.body_id in self._vanished_body_ids:
+                continue
 
-            hp_ratio = 0.0 if body.max_hp <= 0 else max(0.0, min(1.0, body.hp / body.max_hp))
-            bar_w = max(28.0, r * 2.0)
+            death_fade = self._death_fade_by_body_id.get(body.body_id)
+            if body.is_alive:
+                draw_x = body.x
+                draw_y = body.y
+                draw_r = body.radius
+                draw_fill = body.color
+                draw_outline = "#0a0a0a"
+                draw_width = 2.0
+                draw_velocity = True
+            elif death_fade is not None and death_fade.duration > 0:
+                fade_life = max(0.0, min(1.0, death_fade.ttl / death_fade.duration))
+                draw_x = death_fade.x
+                draw_y = death_fade.y
+                draw_r = death_fade.radius * (0.28 + (0.72 * fade_life))
+                draw_fill = self._blend_hex_color(death_fade.base_color, "#121923", 1.0 - fade_life)
+                draw_outline = self._blend_hex_color("#f4f7fc", "#121923", 1.0 - fade_life)
+                draw_width = max(1.0, 2.0 * fade_life)
+                draw_velocity = False
+            else:
+                draw_x = body.x
+                draw_y = body.y
+                draw_r = body.radius
+                draw_fill = "#777777"
+                draw_outline = "#0a0a0a"
+                draw_width = 1.6
+                draw_velocity = False
+
+            self.canvas.create_oval(
+                draw_x - draw_r,
+                draw_y - draw_r,
+                draw_x + draw_r,
+                draw_y + draw_r,
+                fill=draw_fill,
+                outline=draw_outline,
+                width=draw_width,
+            )
+            if draw_velocity:
+                self.canvas.create_line(
+                    body.x,
+                    body.y,
+                    body.x - body.vx * 0.08,
+                    body.y - body.vy * 0.08,
+                    fill="#f6f7f9",
+                    width=1,
+                )
+
+            if not body.is_alive:
+                continue
+
+            hp_anim = self._ensure_hp_bar_anim_state(body)
+            display_ratio = hp_anim.display_ratio
+            chip_ratio = hp_anim.chip_ratio
+            bar_w = max(28.0, draw_r * 2.0)
             bar_h = 7.0
-            bar_x0 = body.x - (bar_w * 0.5)
-            bar_y0 = body.y - r - 24
+            bar_x0 = draw_x - (bar_w * 0.5)
+            bar_y0 = draw_y - draw_r - 24
             self.canvas.create_rectangle(
                 bar_x0,
                 bar_y0,
@@ -1997,22 +2500,90 @@ class PhysicsLabApp:
                 outline="#111820",
                 width=1,
             )
+            chip_x1 = bar_x0 + (bar_w * chip_ratio)
+            display_x1 = bar_x0 + (bar_w * display_ratio)
             self.canvas.create_rectangle(
                 bar_x0,
                 bar_y0,
-                bar_x0 + (bar_w * hp_ratio),
+                chip_x1,
+                bar_y0 + bar_h,
+                fill="#7a3f47",
+                outline="",
+            )
+            self.canvas.create_rectangle(
+                bar_x0,
+                bar_y0,
+                display_x1,
                 bar_y0 + bar_h,
                 fill="#4ad06f",
                 outline="",
             )
+            if display_ratio > chip_ratio + 0.002:
+                self.canvas.create_rectangle(
+                    bar_x0 + (bar_w * chip_ratio),
+                    bar_y0,
+                    display_x1,
+                    bar_y0 + bar_h,
+                    fill="#7ef0b0",
+                    outline="",
+                )
+            if hp_anim.pulse_ttl > 0.0 and hp_anim.pulse_duration > 0.0:
+                pulse_life = max(0.0, min(1.0, hp_anim.pulse_ttl / hp_anim.pulse_duration))
+                pulse_color = self._blend_hex_color(hp_anim.pulse_color, "#121923", 1.0 - pulse_life)
+                pulse_expand = 1.0 + (2.5 * (1.0 - pulse_life))
+                self.canvas.create_rectangle(
+                    bar_x0 - pulse_expand,
+                    bar_y0 - pulse_expand,
+                    bar_x0 + bar_w + pulse_expand,
+                    bar_y0 + bar_h + pulse_expand,
+                    outline=pulse_color,
+                    width=max(1.0, 1.8 * pulse_life),
+                )
 
             self.canvas.create_text(
-                body.x,
-                body.y - r - 14,
+                draw_x,
+                draw_y - draw_r - 14,
                 text=f"HP {body.hp:.0f}/{body.max_hp:.0f}",
                 fill="#dce6f2",
                 font=("Consolas", 10),
             )
+
+        # 발사체 그리기
+        for projectile in self.world.projectiles:
+            if not projectile.active:
+                continue
+
+            r = projectile.radius
+            # 팀 색상 결정
+            fill_color = "#4aa3ff" if projectile.owner_team == "left" else "#f26b5e"
+
+            # 발사체 본체
+            self.canvas.create_oval(
+                projectile.x - r,
+                projectile.y - r,
+                projectile.x + r,
+                projectile.y + r,
+                fill=fill_color,
+                outline="#ffffff",
+                width=2,
+            )
+
+            # 발사체 궤적 (꼬리)
+            tail_length = 15.0
+            tail_x = projectile.x - (projectile.vx / abs(projectile.vx + 1e-9)) * tail_length if projectile.vx != 0 else projectile.x
+            tail_y = projectile.y - (projectile.vy / abs(projectile.vy + 1e-9)) * tail_length if projectile.vy != 0 else projectile.y
+
+            self.canvas.create_line(
+                projectile.x,
+                projectile.y,
+                tail_x,
+                tail_y,
+                fill=fill_color,
+                width=3,
+                arrow=tk.FIRST,
+            )
+
+        self._draw_combat_vfx()
 
         self.canvas.create_text(
             14,
@@ -2023,7 +2594,8 @@ class PhysicsLabApp:
             text=(
                 f"time {self.world.time_elapsed:6.2f}s   "
                 f"max_speed {self.world.max_speed():7.2f}   "
-                f"collisions {self.world.last_step_collisions:2d}"
+                f"collisions {self.world.last_step_collisions:2d}   "
+                f"projectiles {len(self.world.projectiles):2d}"
             ),
         )
 
@@ -2068,11 +2640,14 @@ class PhysicsLabApp:
             self.accumulator += frame_dt
             while self.accumulator >= self.fixed_dt:
                 self.world.step(self.fixed_dt)
+                self._collect_combat_vfx_events()
                 self.accumulator -= self.fixed_dt
                 self._check_battle_end()
                 if self.battle_over:
                     break
 
+        self._update_hp_bar_animation(frame_dt)
+        self._update_combat_vfx(frame_dt)
         self._draw_world()
         self._refresh_status()
         self.root.after(16, self._tick)

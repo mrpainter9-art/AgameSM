@@ -17,13 +17,42 @@ DEFAULT_WORLD_HEIGHT = 520.0
 
 
 @dataclass(frozen=True, slots=True)
+class BallClass:
+    """Ball의 기본 클래스 (역할별 기본 성능치)"""
+    name: str
+    role: str
+    description: str
+    # 기본 스탯
+    base_radius: float
+    base_mass: float
+    base_power: float
+    base_hp: float
+    base_speed: float
+    # 특수 능력
+    ability_cooldown: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
 class BallProfile:
+    """Ball의 프로필 (스케일 배율) - 기존 호환성 유지"""
     name: str
     radius_scale: float
     mass_scale: float
     power_scale: float
     hp_scale: float
     speed_scale: float
+
+    @classmethod
+    def from_ball_class(cls, ball_class: BallClass, scale: float = 1.0) -> "BallProfile":
+        """BallClass로부터 BallProfile 생성"""
+        return cls(
+            name=ball_class.name,
+            radius_scale=scale,
+            mass_scale=scale,
+            power_scale=scale,
+            hp_scale=scale,
+            speed_scale=scale,
+        )
 
 
 @dataclass(slots=True)
@@ -74,7 +103,58 @@ class SweepResult:
     recommendations: list[str]
 
 
+def default_ball_classes() -> list[BallClass]:
+    """기본 Ball 클래스 정의 (딜러, 탱커, 힐러, 원거리 딜러)"""
+    return [
+        BallClass(
+            name="딜러",
+            role="dealer",
+            description="근접 공격에 특화된 공격형 유닛",
+            base_radius=28.0,
+            base_mass=1.0,
+            base_power=1.2,
+            base_hp=100.0,
+            base_speed=250.0,
+            ability_cooldown=0.0,
+        ),
+        BallClass(
+            name="탱커",
+            role="tank",
+            description="높은 체력과 질량으로 전선을 유지하는 방어형 유닛",
+            base_radius=38.0,
+            base_mass=1.8,
+            base_power=0.8,
+            base_hp=180.0,
+            base_speed=180.0,
+            ability_cooldown=0.0,
+        ),
+        BallClass(
+            name="힐러",
+            role="healer",
+            description="아군을 치료하는 지원형 유닛",
+            base_radius=26.0,
+            base_mass=0.8,
+            base_power=0.6,
+            base_hp=80.0,
+            base_speed=220.0,
+            ability_cooldown=1.2,
+        ),
+        BallClass(
+            name="원거리 딜러",
+            role="ranged_dealer",
+            description="원거리에서 적을 공격하는 유닛",
+            base_radius=24.0,
+            base_mass=0.7,
+            base_power=1.0,
+            base_hp=70.0,
+            base_speed=200.0,
+            ability_cooldown=1.0,
+        ),
+    ]
+
+
 def default_profiles() -> list[BallProfile]:
+    """기본 프로필 (기존 호환성 유지용)"""
     return [
         BallProfile("balanced", 1.00, 1.00, 1.00, 1.00, 1.00),
         BallProfile("duelist", 0.90, 0.95, 1.15, 1.00, 1.30),
@@ -83,6 +163,25 @@ def default_profiles() -> list[BallProfile]:
         BallProfile("berserker", 1.00, 0.84, 1.46, 0.74, 1.12),
         BallProfile("juggernaut", 1.20, 1.72, 1.08, 1.84, 0.72),
     ]
+
+
+def ball_class_to_profile(ball_class: BallClass, scale_modifier: float = 1.0) -> BallProfile:
+    """BallClass를 BallProfile로 변환 (스케일 적용)"""
+    # 기본값 대비 상대 배율 계산
+    default_radius = 32.0
+    default_mass = 1.0
+    default_power = 1.0
+    default_hp = 100.0
+    default_speed = 240.0
+
+    return BallProfile(
+        name=ball_class.name,
+        radius_scale=(ball_class.base_radius / default_radius) * scale_modifier,
+        mass_scale=(ball_class.base_mass / default_mass) * scale_modifier,
+        power_scale=(ball_class.base_power / default_power) * scale_modifier,
+        hp_scale=(ball_class.base_hp / default_hp) * scale_modifier,
+        speed_scale=(ball_class.base_speed / default_speed) * scale_modifier,
+    )
 
 
 def _random_profile(rng: random.Random, name: str) -> BallProfile:

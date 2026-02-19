@@ -133,6 +133,21 @@
       "y": null
     },
     {
+      "team": "right",
+      "role": "tank",
+      "radius": 40.0,
+      "mass": 2.2,
+      "power": 1.0,
+      "hp": 220.0,
+      "max_hp": 220.0,
+      "vx": -160.0,
+      "vy": 0.0,
+      "forward_dir": -1.0,
+      "color": "#f26b5e",
+      "x": null,
+      "y": null
+    },
+    {
       "team": "left",
       "role": "ranged_dealer",
       "radius": 24.0,
@@ -144,6 +159,21 @@
       "vy": 0.0,
       "forward_dir": 1.0,
       "color": "#4aa3ff",
+      "x": null,
+      "y": null
+    },
+    {
+      "team": "right",
+      "role": "healer",
+      "radius": 26.0,
+      "mass": 0.8,
+      "power": 0.6,
+      "hp": 80.0,
+      "max_hp": 80.0,
+      "vx": -220.0,
+      "vy": 0.0,
+      "forward_dir": -1.0,
+      "color": "#f26b5e",
       "x": null,
       "y": null
     }

@@ -604,10 +604,15 @@ class PhysicsLabTests(unittest.TestCase):
         )
         world = PhysicsWorld(width=600.0, height=200.0, bodies=[ranged, target], tuning=tuning)
 
-        world.step(0.02)
+        # 발사체가 생성되고 타겟에 도달할 때까지 여러 스텝 실행
+        for _ in range(20):
+            world.step(0.02)
+            # 타겟이 피격되었으면 테스트 종료
+            if target.hp < target.max_hp:
+                break
 
-        self.assertGreater(target.vx, 0.0)
-        self.assertLess(target.hp, target.max_hp)
+        self.assertGreater(len(world.projectiles), 0, "발사체가 생성되어야 함")
+        self.assertLess(target.hp, target.max_hp, "타겟이 피해를 입어야 함")
 
     def test_healer_restores_ally_hp(self) -> None:
         tuning = PhysicsTuning(
@@ -673,6 +678,287 @@ class PhysicsLabTests(unittest.TestCase):
         world.step(0.02)
 
         self.assertGreater(ally.hp, hp_before)
+
+    def test_healer_prioritizes_frontline_ally(self) -> None:
+        tuning = PhysicsTuning(
+            gravity=0.0,
+            approach_force=0.0,
+            restitution=0.0,
+            wall_restitution=1.0,
+            linear_damping=0.0,
+            friction=0.0,
+            wall_friction=0.0,
+            ground_friction=0.0,
+            healer_cooldown=0.5,
+            healer_range=220.0,
+            healer_amount=10.0,
+        )
+        healer = PhysicsBody(
+            body_id=0,
+            team="left",
+            x=100.0,
+            y=70.0,
+            vx=0.0,
+            vy=0.0,
+            radius=10.0,
+            mass=1.0,
+            color="#4aa3ff",
+            power=1.0,
+            role="healer",
+            forward_dir=1.0,
+        )
+        rear_low_hp = PhysicsBody(
+            body_id=1,
+            team="left",
+            x=150.0,
+            y=70.0,
+            vx=0.0,
+            vy=0.0,
+            radius=10.0,
+            mass=1.0,
+            color="#4aa3ff",
+            power=1.0,
+            role="dealer",
+            max_hp=120.0,
+            hp=40.0,
+            forward_dir=1.0,
+        )
+        front_ally = PhysicsBody(
+            body_id=2,
+            team="left",
+            x=250.0,
+            y=70.0,
+            vx=0.0,
+            vy=0.0,
+            radius=10.0,
+            mass=1.0,
+            color="#4aa3ff",
+            power=1.0,
+            role="dealer",
+            max_hp=120.0,
+            hp=95.0,
+            forward_dir=1.0,
+        )
+        enemy = PhysicsBody(
+            body_id=3,
+            team="right",
+            x=500.0,
+            y=70.0,
+            vx=0.0,
+            vy=0.0,
+            radius=10.0,
+            mass=1.0,
+            color="#f26b5e",
+            power=1.0,
+            role="dealer",
+            forward_dir=-1.0,
+        )
+        world = PhysicsWorld(
+            width=700.0,
+            height=220.0,
+            bodies=[healer, rear_low_hp, front_ally, enemy],
+            tuning=tuning,
+        )
+
+        rear_before = rear_low_hp.hp
+        front_before = front_ally.hp
+        world.step(0.02)
+
+        self.assertGreater(front_ally.hp, front_before)
+        self.assertEqual(rear_before, rear_low_hp.hp)
+
+    def test_healer_range_scales_with_power(self) -> None:
+        tuning = PhysicsTuning(
+            gravity=0.0,
+            approach_force=0.0,
+            restitution=0.0,
+            wall_restitution=1.0,
+            linear_damping=0.0,
+            friction=0.0,
+            wall_friction=0.0,
+            ground_friction=0.0,
+            healer_cooldown=0.5,
+            healer_range=120.0,
+            healer_amount=10.0,
+        )
+        low_healer = PhysicsBody(
+            body_id=0,
+            team="left",
+            x=100.0,
+            y=70.0,
+            vx=0.0,
+            vy=0.0,
+            radius=10.0,
+            mass=1.0,
+            color="#4aa3ff",
+            power=0.7,
+            role="healer",
+            forward_dir=1.0,
+        )
+        low_target = PhysicsBody(
+            body_id=1,
+            team="left",
+            x=210.0,
+            y=70.0,
+            vx=0.0,
+            vy=0.0,
+            radius=10.0,
+            mass=1.0,
+            color="#4aa3ff",
+            power=1.0,
+            role="dealer",
+            max_hp=120.0,
+            hp=80.0,
+            forward_dir=1.0,
+        )
+        low_enemy = PhysicsBody(
+            body_id=2,
+            team="right",
+            x=480.0,
+            y=70.0,
+            vx=0.0,
+            vy=0.0,
+            radius=10.0,
+            mass=1.0,
+            color="#f26b5e",
+            power=1.0,
+            role="dealer",
+            forward_dir=-1.0,
+        )
+        low_world = PhysicsWorld(
+            width=700.0,
+            height=220.0,
+            bodies=[low_healer, low_target, low_enemy],
+            tuning=tuning,
+        )
+
+        high_healer = PhysicsBody(
+            body_id=10,
+            team="left",
+            x=100.0,
+            y=70.0,
+            vx=0.0,
+            vy=0.0,
+            radius=10.0,
+            mass=1.0,
+            color="#4aa3ff",
+            power=1.6,
+            role="healer",
+            forward_dir=1.0,
+        )
+        high_target = PhysicsBody(
+            body_id=11,
+            team="left",
+            x=210.0,
+            y=70.0,
+            vx=0.0,
+            vy=0.0,
+            radius=10.0,
+            mass=1.0,
+            color="#4aa3ff",
+            power=1.0,
+            role="dealer",
+            max_hp=120.0,
+            hp=80.0,
+            forward_dir=1.0,
+        )
+        high_enemy = PhysicsBody(
+            body_id=12,
+            team="right",
+            x=480.0,
+            y=70.0,
+            vx=0.0,
+            vy=0.0,
+            radius=10.0,
+            mass=1.0,
+            color="#f26b5e",
+            power=1.0,
+            role="dealer",
+            forward_dir=-1.0,
+        )
+        high_world = PhysicsWorld(
+            width=700.0,
+            height=220.0,
+            bodies=[high_healer, high_target, high_enemy],
+            tuning=tuning,
+        )
+
+        low_before = low_target.hp
+        high_before = high_target.hp
+        low_world.step(0.02)
+        high_world.step(0.02)
+
+        self.assertEqual(low_before, low_target.hp)
+        self.assertGreater(high_target.hp, high_before)
+
+    def test_healer_holds_back_when_frontline_ally_is_in_range(self) -> None:
+        tuning = PhysicsTuning(
+            gravity=0.0,
+            approach_force=320.0,
+            restitution=0.0,
+            wall_restitution=1.0,
+            linear_damping=0.0,
+            friction=0.0,
+            wall_friction=0.0,
+            ground_friction=0.0,
+            healer_cooldown=0.5,
+            healer_range=220.0,
+            healer_amount=10.0,
+        )
+        healer = PhysicsBody(
+            body_id=0,
+            team="left",
+            x=100.0,
+            y=70.0,
+            vx=0.0,
+            vy=0.0,
+            radius=10.0,
+            mass=1.0,
+            color="#4aa3ff",
+            power=1.0,
+            role="healer",
+            forward_dir=1.0,
+        )
+        frontline_ally = PhysicsBody(
+            body_id=1,
+            team="left",
+            x=180.0,
+            y=70.0,
+            vx=0.0,
+            vy=0.0,
+            radius=10.0,
+            mass=1.0,
+            color="#4aa3ff",
+            power=1.0,
+            role="dealer",
+            max_hp=120.0,
+            hp=120.0,
+            forward_dir=1.0,
+        )
+        enemy = PhysicsBody(
+            body_id=2,
+            team="right",
+            x=520.0,
+            y=70.0,
+            vx=0.0,
+            vy=0.0,
+            radius=10.0,
+            mass=1.0,
+            color="#f26b5e",
+            power=1.0,
+            role="dealer",
+            forward_dir=-1.0,
+        )
+        world = PhysicsWorld(
+            width=760.0,
+            height=240.0,
+            bodies=[healer, frontline_ally, enemy],
+            tuning=tuning,
+        )
+
+        world.step(0.02)
+
+        self.assertAlmostEqual(0.0, healer.vx, places=6)
 
 
 if __name__ == "__main__":

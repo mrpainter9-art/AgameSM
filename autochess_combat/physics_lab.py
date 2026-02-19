@@ -6,6 +6,30 @@ import random
 
 
 @dataclass(slots=True)
+class Projectile:
+    """발사체 (원거리 공격용)"""
+    projectile_id: int
+    owner_team: str
+    x: float
+    y: float
+    vx: float
+    vy: float
+    radius: float = 6.0
+    damage: float = 5.0
+    lifetime: float = 3.0
+    age: float = 0.0
+    active: bool = True
+
+    def update(self, dt: float) -> None:
+        """발사체 위치 업데이트"""
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+        self.age += dt
+        if self.age >= self.lifetime:
+            self.active = False
+
+
+@dataclass(slots=True)
 class PhysicsBody:
     body_id: int
     team: str
@@ -58,41 +82,303 @@ class PhysicsBody:
 
 
 @dataclass(slots=True)
-class PhysicsTuning:
+class PhysicsBasics:
+    """기본 물리 설정 (중력, 이동력)"""
     gravity: float = 900.0
     approach_force: float = 1150.0
+
+
+@dataclass(slots=True)
+class CollisionSettings:
+    """충돌 반발 설정"""
     restitution: float = 0.68
     wall_restitution: float = 0.55
+    collision_boost: float = 1.0
+
+
+@dataclass(slots=True)
+class FrictionSettings:
+    """마찰 설정"""
     linear_damping: float = 0.16
     friction: float = 0.20
     wall_friction: float = 0.08
     ground_friction: float = 0.30
-    ground_snap_speed: float = 42.0
-    collision_boost: float = 1.0
+
+
+@dataclass(slots=True)
+class SolverSettings:
+    """충돌 해결 정밀도"""
     solver_passes: int = 3
     position_correction: float = 0.80
+    ground_snap_speed: float = 42.0
+
+
+@dataclass(slots=True)
+class ImpactSettings:
+    """충돌 강도 계산"""
     mass_power_impact_scale: float = 120.0
     power_ratio_exponent: float = 0.50
     impact_speed_cap: float = 1400.0
+
+
+@dataclass(slots=True)
+class RecoilSettings:
+    """밀려남 효과"""
     min_recoil_speed: float = 45.0
     recoil_scale: float = 0.62
+
+
+@dataclass(slots=True)
+class LaunchSettings:
+    """튕겨올림 효과"""
     min_launch_speed: float = 90.0
     launch_scale: float = 0.45
     launch_height_scale: float = 1.0
     max_launch_speed: float = 820.0
+
+
+@dataclass(slots=True)
+class DamageSettings:
+    """데미지 설정"""
     damage_base: float = 1.5
     damage_scale: float = 0.028
+
+
+@dataclass(slots=True)
+class StaggerSettings:
+    """경직 설정"""
     stagger_base: float = 0.06
     stagger_scale: float = 0.0012
     max_stagger: float = 1.20
     stagger_drive_multiplier: float = 0.0
+
+
+@dataclass(slots=True)
+class RangedAttackSettings:
+    """원거리 공격 설정"""
     ranged_attack_cooldown: float = 1.00
     ranged_attack_range: float = 520.0
     ranged_knockback_force: float = 240.0
     ranged_damage: float = 5.5
+
+
+@dataclass(slots=True)
+class HealingSettings:
+    """힐링 설정"""
     healer_cooldown: float = 1.20
     healer_range: float = 360.0
     healer_amount: float = 10.0
+
+
+@dataclass(slots=True)
+class PhysicsTuning:
+    """물리 시스템 전체 설정 (카테고리별로 구성)"""
+    # 기본 물리
+    gravity: float = 900.0
+    approach_force: float = 1150.0
+
+    # 충돌 반발
+    restitution: float = 0.68
+    wall_restitution: float = 0.55
+    collision_boost: float = 1.0
+
+    # 마찰
+    linear_damping: float = 0.16
+    friction: float = 0.20
+    wall_friction: float = 0.08
+    ground_friction: float = 0.30
+
+    # 충돌 해결
+    solver_passes: int = 3
+    position_correction: float = 0.80
+    ground_snap_speed: float = 42.0
+
+    # 충돌 강도
+    mass_power_impact_scale: float = 120.0
+    power_ratio_exponent: float = 0.50
+    impact_speed_cap: float = 1400.0
+
+    # 밀려남
+    min_recoil_speed: float = 45.0
+    recoil_scale: float = 0.62
+
+    # 튕겨올림
+    min_launch_speed: float = 90.0
+    launch_scale: float = 0.45
+    launch_height_scale: float = 1.0
+    max_launch_speed: float = 820.0
+
+    # 데미지
+    damage_base: float = 1.5
+    damage_scale: float = 0.028
+
+    # 경직
+    stagger_base: float = 0.06
+    stagger_scale: float = 0.0012
+    max_stagger: float = 1.20
+    stagger_drive_multiplier: float = 0.0
+
+    # 원거리 공격
+    ranged_attack_cooldown: float = 1.00
+    ranged_attack_range: float = 520.0
+    ranged_knockback_force: float = 240.0
+    ranged_damage: float = 5.5
+
+    # 힐링
+    healer_cooldown: float = 1.20
+    healer_range: float = 360.0
+    healer_amount: float = 10.0
+
+    @classmethod
+    def from_categories(
+        cls,
+        physics: PhysicsBasics | None = None,
+        collision: CollisionSettings | None = None,
+        friction: FrictionSettings | None = None,
+        solver: SolverSettings | None = None,
+        impact: ImpactSettings | None = None,
+        recoil: RecoilSettings | None = None,
+        launch: LaunchSettings | None = None,
+        damage: DamageSettings | None = None,
+        stagger: StaggerSettings | None = None,
+        ranged_attack: RangedAttackSettings | None = None,
+        healing: HealingSettings | None = None,
+    ) -> "PhysicsTuning":
+        """카테고리별 설정으로부터 PhysicsTuning 생성"""
+        physics = physics or PhysicsBasics()
+        collision = collision or CollisionSettings()
+        friction = friction or FrictionSettings()
+        solver = solver or SolverSettings()
+        impact = impact or ImpactSettings()
+        recoil = recoil or RecoilSettings()
+        launch = launch or LaunchSettings()
+        damage = damage or DamageSettings()
+        stagger = stagger or StaggerSettings()
+        ranged_attack = ranged_attack or RangedAttackSettings()
+        healing = healing or HealingSettings()
+
+        return cls(
+            gravity=physics.gravity,
+            approach_force=physics.approach_force,
+            restitution=collision.restitution,
+            wall_restitution=collision.wall_restitution,
+            collision_boost=collision.collision_boost,
+            linear_damping=friction.linear_damping,
+            friction=friction.friction,
+            wall_friction=friction.wall_friction,
+            ground_friction=friction.ground_friction,
+            solver_passes=solver.solver_passes,
+            position_correction=solver.position_correction,
+            ground_snap_speed=solver.ground_snap_speed,
+            mass_power_impact_scale=impact.mass_power_impact_scale,
+            power_ratio_exponent=impact.power_ratio_exponent,
+            impact_speed_cap=impact.impact_speed_cap,
+            min_recoil_speed=recoil.min_recoil_speed,
+            recoil_scale=recoil.recoil_scale,
+            min_launch_speed=launch.min_launch_speed,
+            launch_scale=launch.launch_scale,
+            launch_height_scale=launch.launch_height_scale,
+            max_launch_speed=launch.max_launch_speed,
+            damage_base=damage.damage_base,
+            damage_scale=damage.damage_scale,
+            stagger_base=stagger.stagger_base,
+            stagger_scale=stagger.stagger_scale,
+            max_stagger=stagger.max_stagger,
+            stagger_drive_multiplier=stagger.stagger_drive_multiplier,
+            ranged_attack_cooldown=ranged_attack.ranged_attack_cooldown,
+            ranged_attack_range=ranged_attack.ranged_attack_range,
+            ranged_knockback_force=ranged_attack.ranged_knockback_force,
+            ranged_damage=ranged_attack.ranged_damage,
+            healer_cooldown=healing.healer_cooldown,
+            healer_range=healing.healer_range,
+            healer_amount=healing.healer_amount,
+        )
+
+    def to_physics_basics(self) -> PhysicsBasics:
+        """기본 물리 설정 추출"""
+        return PhysicsBasics(gravity=self.gravity, approach_force=self.approach_force)
+
+    def to_collision_settings(self) -> CollisionSettings:
+        """충돌 반발 설정 추출"""
+        return CollisionSettings(
+            restitution=self.restitution,
+            wall_restitution=self.wall_restitution,
+            collision_boost=self.collision_boost,
+        )
+
+    def to_friction_settings(self) -> FrictionSettings:
+        """마찰 설정 추출"""
+        return FrictionSettings(
+            linear_damping=self.linear_damping,
+            friction=self.friction,
+            wall_friction=self.wall_friction,
+            ground_friction=self.ground_friction,
+        )
+
+    def to_solver_settings(self) -> SolverSettings:
+        """충돌 해결 설정 추출"""
+        return SolverSettings(
+            solver_passes=self.solver_passes,
+            position_correction=self.position_correction,
+            ground_snap_speed=self.ground_snap_speed,
+        )
+
+    def to_impact_settings(self) -> ImpactSettings:
+        """충돌 강도 설정 추출"""
+        return ImpactSettings(
+            mass_power_impact_scale=self.mass_power_impact_scale,
+            power_ratio_exponent=self.power_ratio_exponent,
+            impact_speed_cap=self.impact_speed_cap,
+        )
+
+    def to_recoil_settings(self) -> RecoilSettings:
+        """밀려남 설정 추출"""
+        return RecoilSettings(
+            min_recoil_speed=self.min_recoil_speed,
+            recoil_scale=self.recoil_scale,
+        )
+
+    def to_launch_settings(self) -> LaunchSettings:
+        """튕겨올림 설정 추출"""
+        return LaunchSettings(
+            min_launch_speed=self.min_launch_speed,
+            launch_scale=self.launch_scale,
+            launch_height_scale=self.launch_height_scale,
+            max_launch_speed=self.max_launch_speed,
+        )
+
+    def to_damage_settings(self) -> DamageSettings:
+        """데미지 설정 추출"""
+        return DamageSettings(
+            damage_base=self.damage_base,
+            damage_scale=self.damage_scale,
+        )
+
+    def to_stagger_settings(self) -> StaggerSettings:
+        """경직 설정 추출"""
+        return StaggerSettings(
+            stagger_base=self.stagger_base,
+            stagger_scale=self.stagger_scale,
+            max_stagger=self.max_stagger,
+            stagger_drive_multiplier=self.stagger_drive_multiplier,
+        )
+
+    def to_ranged_attack_settings(self) -> RangedAttackSettings:
+        """원거리 공격 설정 추출"""
+        return RangedAttackSettings(
+            ranged_attack_cooldown=self.ranged_attack_cooldown,
+            ranged_attack_range=self.ranged_attack_range,
+            ranged_knockback_force=self.ranged_knockback_force,
+            ranged_damage=self.ranged_damage,
+        )
+
+    def to_healing_settings(self) -> HealingSettings:
+        """힐링 설정 추출"""
+        return HealingSettings(
+            healer_cooldown=self.healer_cooldown,
+            healer_range=self.healer_range,
+            healer_amount=self.healer_amount,
+        )
 
     def validate(self) -> None:
         if self.restitution < 0:
@@ -172,6 +458,8 @@ class PhysicsWorld:
     last_step_collisions: int = 0
     active_contacts: set[tuple[int, int]] = field(default_factory=set)
     invincible_teams: set[str] = field(default_factory=set)
+    projectiles: list[Projectile] = field(default_factory=list)
+    next_projectile_id: int = 0
 
     def __post_init__(self) -> None:
         if self.width <= 0 or self.height <= 0:
@@ -232,9 +520,28 @@ class PhysicsWorld:
             on_ground = self._is_grounded(body)
             drive_force = 0.0
             if body.is_alive:
-                drive_force = self.tuning.approach_force * body.power
-                if body.stagger_timer > 0:
-                    drive_force *= self.tuning.stagger_drive_multiplier
+                # 원거리 딜러는 사정거리 내에 적이 있으면 멈춤
+                should_stop = False
+                if body.role == "ranged_dealer":
+                    target = self._closest_enemy(body, self.tuning.ranged_attack_range)
+                    if target is not None:
+                        should_stop = True
+                elif body.role == "healer":
+                    support_target = self._frontline_ally(
+                        body,
+                        self._healer_effective_range(body),
+                        require_missing_hp=False,
+                    )
+                    if support_target is not None:
+                        should_stop = True
+
+                if not should_stop:
+                    drive_force = self.tuning.approach_force * body.power
+                    if body.role == "healer":
+                        # Keep healer behind the frontline instead of overcommitting.
+                        drive_force *= 0.55
+                    if body.stagger_timer > 0:
+                        drive_force *= self.tuning.stagger_drive_multiplier
 
             ax = (body.forward_dir * drive_force) / body.mass
             ay = self.tuning.gravity
@@ -262,6 +569,7 @@ class PhysicsWorld:
             collision_count += self._resolve_body_collisions(current_contacts, impact_pairs)
 
         self._apply_role_actions()
+        self._update_projectiles(dt)
 
         self.active_contacts = current_contacts
         self.last_step_collisions = collision_count
@@ -478,6 +786,63 @@ class PhysicsWorld:
                 closest = other
         return closest
 
+    def _healer_effective_range(self, actor: PhysicsBody) -> float:
+        # Healer support range scales with healer power.
+        scale = max(0.6, min(1.8, actor.power))
+        return self.tuning.healer_range * scale
+
+    def _frontline_ally(
+        self,
+        actor: PhysicsBody,
+        max_range: float,
+        *,
+        require_missing_hp: bool,
+    ) -> PhysicsBody | None:
+        frontmost: PhysicsBody | None = None
+        max_range_sq = max_range * max_range
+        forward = actor.forward_dir
+        if abs(forward) <= 1e-6:
+            forward = 1.0 if actor.team == "left" else -1.0
+
+        best_front_score = -float("inf")
+        best_hp_ratio = float("inf")
+        best_dist_sq = float("inf")
+        for other in self.bodies:
+            if not other.is_alive or other.team != actor.team:
+                continue
+            if other.body_id == actor.body_id:
+                continue
+            if other.max_hp <= 0:
+                continue
+            if require_missing_hp and other.hp >= other.max_hp:
+                continue
+
+            dx = other.x - actor.x
+            dy = other.y - actor.y
+            dist_sq = (dx * dx) + (dy * dy)
+            if dist_sq > max_range_sq:
+                continue
+
+            front_score = other.x * forward
+            hp_ratio = other.hp / other.max_hp
+            if front_score > best_front_score + 1e-6:
+                frontmost = other
+                best_front_score = front_score
+                best_hp_ratio = hp_ratio
+                best_dist_sq = dist_sq
+                continue
+            if abs(front_score - best_front_score) > 1e-6:
+                continue
+            if hp_ratio < best_hp_ratio - 1e-6:
+                frontmost = other
+                best_hp_ratio = hp_ratio
+                best_dist_sq = dist_sq
+                continue
+            if abs(hp_ratio - best_hp_ratio) <= 1e-6 and dist_sq < best_dist_sq:
+                frontmost = other
+                best_dist_sq = dist_sq
+        return frontmost
+
     def _weakest_ally(self, actor: PhysicsBody, max_range: float) -> PhysicsBody | None:
         weakest: PhysicsBody | None = None
         weakest_ratio = 1.1
@@ -529,6 +894,86 @@ class PhysicsWorld:
             target.hp = max(0.0, target.hp - scaled_damage)
             target.last_damage = max(target.last_damage, scaled_damage)
 
+    def create_projectile(
+        self,
+        owner: PhysicsBody,
+        target_x: float,
+        target_y: float,
+        speed: float = 400.0,
+    ) -> None:
+        """발사체 생성"""
+        dx = target_x - owner.x
+        dy = target_y - owner.y
+        distance = math.hypot(dx, dy)
+        if distance <= 1e-9:
+            return
+
+        # 발사 방향 계산
+        direction_x = dx / distance
+        direction_y = dy / distance
+
+        projectile = Projectile(
+            projectile_id=self.next_projectile_id,
+            owner_team=owner.team,
+            x=owner.x,
+            y=owner.y,
+            vx=direction_x * speed,
+            vy=direction_y * speed,
+            radius=6.0,
+            damage=self.tuning.ranged_damage * owner.power,
+            lifetime=3.0,
+        )
+        self.projectiles.append(projectile)
+        self.next_projectile_id += 1
+
+    def _update_projectiles(self, dt: float) -> None:
+        """발사체 업데이트 및 충돌 처리"""
+        for projectile in self.projectiles[:]:  # 복사본으로 순회
+            if not projectile.active:
+                self.projectiles.remove(projectile)
+                continue
+
+            # 위치 업데이트
+            projectile.update(dt)
+
+            # 벽 충돌 체크 (벽에 닿으면 비활성화)
+            if (projectile.x < 0 or projectile.x > self.width or
+                projectile.y < 0 or projectile.y > self.height):
+                projectile.active = False
+                continue
+
+            # 적 충돌 체크
+            for body in self.bodies:
+                if not body.is_alive:
+                    continue
+                if body.team == projectile.owner_team:
+                    continue
+
+                # 충돌 감지
+                dx = body.x - projectile.x
+                dy = body.y - projectile.y
+                distance_sq = dx * dx + dy * dy
+                collision_distance = body.radius + projectile.radius
+
+                if distance_sq <= collision_distance * collision_distance:
+                    # 데미지 적용
+                    if not self.is_team_invincible(body.team):
+                        body.hp = max(0.0, body.hp - projectile.damage)
+                        body.last_damage = projectile.damage
+
+                    # 넉백 적용
+                    if distance_sq > 1e-9:
+                        distance = math.sqrt(distance_sq)
+                        nx = dx / distance
+                        ny = dy / distance
+                        knockback_force = self.tuning.ranged_knockback_force * 0.5
+                        body.vx += nx * (knockback_force / max(1e-6, body.mass))
+                        body.vy += ny * (knockback_force / max(1e-6, body.mass)) * 0.5
+
+                    # 발사체 비활성화
+                    projectile.active = False
+                    break
+
     def _apply_role_actions(self) -> None:
         for actor in self.bodies:
             if not actor.is_alive:
@@ -541,15 +986,16 @@ class PhysicsWorld:
                 target = self._closest_enemy(actor, self.tuning.ranged_attack_range)
                 if target is None:
                     continue
-                self._apply_ranged_knockback(
-                    actor,
-                    target,
-                    force=self.tuning.ranged_knockback_force,
-                    damage=self.tuning.ranged_damage,
-                )
+
+                # 발사체 생성
+                self.create_projectile(actor, target.x, target.y, speed=500.0)
                 actor.ability_cooldown = self.tuning.ranged_attack_cooldown
             elif role == "healer":
-                target = self._weakest_ally(actor, self.tuning.healer_range * 0.7)
+                target = self._frontline_ally(
+                    actor,
+                    self._healer_effective_range(actor),
+                    require_missing_hp=True,
+                )
                 if target is None:
                     continue
                 heal = self.tuning.healer_amount * 0.8
@@ -557,7 +1003,7 @@ class PhysicsWorld:
                 actor.ability_cooldown = self.tuning.healer_cooldown
             elif role == "ranged_healer":
                 acted = False
-                heal_target = self._weakest_ally(actor, self.tuning.healer_range)
+                heal_target = self._weakest_ally(actor, self._healer_effective_range(actor))
                 if heal_target is not None:
                     heal = self.tuning.healer_amount * 1.1
                     heal_target.hp = min(heal_target.max_hp, heal_target.hp + heal)
