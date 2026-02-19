@@ -556,7 +556,7 @@ class PhysicsWorld:
             if body.is_alive:
                 should_stop = False
                 if body.role == "ranged_dealer":
-                    target = self._closest_enemy(body, self.tuning.ranged_attack_range)
+                    target = self._closest_enemy(body, self._ranged_effective_range(body))
                     if target is not None:
                         should_stop = True
                 elif body.role == "healer":
@@ -569,7 +569,7 @@ class PhysicsWorld:
                         should_stop = True
 
                 if not should_stop:
-                    drive_force = self.tuning.approach_force * body.power
+                    drive_force = self._effective_drive_force(body)
                     if body.role == "healer":
                         drive_force *= 0.55
                     if body.stagger_timer > 0:
@@ -822,10 +822,149 @@ class PhysicsWorld:
                 closest = other
         return closest
 
+    @staticmethod
+    def _clamp(value: float, low: float, high: float) -> float:
+        return max(low, min(high, value))
+
+    def _stat_link_factor(
+        self,
+        body: PhysicsBody,
+        *,
+        power_exp: float = 0.0,
+        mass_exp: float = 0.0,
+        radius_exp: float = 0.0,
+        hp_exp: float = 0.0,
+        min_scale: float = 0.5,
+        max_scale: float = 2.5,
+    ) -> float:
+        power_factor = max(0.1, body.power) ** power_exp
+        mass_factor = max(0.1, body.mass) ** mass_exp
+        radius_factor = (max(1.0, body.radius) / 32.0) ** radius_exp
+        hp_factor = (max(1.0, body.max_hp) / 100.0) ** hp_exp
+        scale = power_factor * mass_factor * radius_factor * hp_factor
+        return self._clamp(scale, min_scale, max_scale)
+
+    def _effective_drive_force(self, body: PhysicsBody) -> float:
+        linked = self._stat_link_factor(
+            body,
+            power_exp=1.0,
+            mass_exp=-0.25,
+            radius_exp=0.08,
+            hp_exp=0.04,
+            min_scale=0.35,
+            max_scale=3.0,
+        )
+        return self.tuning.approach_force * linked
+
+    def _ranged_effective_range(self, actor: PhysicsBody) -> float:
+        linked = self._stat_link_factor(
+            actor,
+            power_exp=0.35,
+            mass_exp=0.04,
+            radius_exp=0.08,
+            min_scale=0.7,
+            max_scale=2.2,
+        )
+        return self.tuning.ranged_attack_range * linked
+
+    def _ranged_effective_force(self, actor: PhysicsBody, base_force: float) -> float:
+        linked = self._stat_link_factor(
+            actor,
+            power_exp=0.65,
+            mass_exp=0.10,
+            radius_exp=0.06,
+            min_scale=0.55,
+            max_scale=2.6,
+        )
+        return base_force * linked
+
+    def _ranged_effective_damage(self, actor: PhysicsBody, base_damage: float) -> float:
+        linked = self._stat_link_factor(
+            actor,
+            power_exp=1.0,
+            mass_exp=0.08,
+            hp_exp=0.05,
+            min_scale=0.55,
+            max_scale=2.8,
+        )
+        return base_damage * linked
+
+    def _effective_projectile_speed(self, actor: PhysicsBody) -> float:
+        linked = self._stat_link_factor(
+            actor,
+            power_exp=0.35,
+            mass_exp=-0.08,
+            radius_exp=0.06,
+            min_scale=0.7,
+            max_scale=1.9,
+        )
+        return self.tuning.projectile_speed * linked
+
+    def _effective_projectile_radius(self, actor: PhysicsBody) -> float:
+        linked = self._stat_link_factor(
+            actor,
+            power_exp=0.12,
+            radius_exp=0.35,
+            min_scale=0.75,
+            max_scale=2.0,
+        )
+        return self.tuning.projectile_radius * linked
+
+    def _effective_projectile_lifetime(self, actor: PhysicsBody) -> float:
+        linked = self._stat_link_factor(
+            actor,
+            power_exp=0.18,
+            mass_exp=0.06,
+            min_scale=0.7,
+            max_scale=1.8,
+        )
+        return self.tuning.projectile_lifetime * linked
+
+    def _effective_heal_amount(
+        self,
+        actor: PhysicsBody,
+        target: PhysicsBody,
+        *,
+        base_multiplier: float,
+    ) -> float:
+        actor_scale = self._stat_link_factor(
+            actor,
+            power_exp=0.60,
+            mass_exp=-0.06,
+            hp_exp=0.08,
+            min_scale=0.55,
+            max_scale=2.3,
+        )
+        if target.max_hp > 0:
+            missing_ratio = self._clamp((target.max_hp - target.hp) / target.max_hp, 0.0, 1.0)
+        else:
+            missing_ratio = 0.0
+        need_scale = 0.85 + (missing_ratio * 0.35)
+        return self.tuning.healer_amount * base_multiplier * actor_scale * need_scale
+
+    def _effective_ability_cooldown(self, base_cooldown: float, actor: PhysicsBody) -> float:
+        speed_scale = self._stat_link_factor(
+            actor,
+            power_exp=0.35,
+            mass_exp=0.04,
+            hp_exp=-0.05,
+            min_scale=0.65,
+            max_scale=1.9,
+        )
+        return base_cooldown / speed_scale
+
     def _healer_effective_range(self, actor: PhysicsBody) -> float:
-        # Healer support range scales with healer power.
-        scale = max(0.6, min(1.8, actor.power))
-        return self.tuning.healer_range * scale
+        # Healer support range follows actor stats so support class identity comes from body setup.
+        linked = self._stat_link_factor(
+            actor,
+            power_exp=1.0,
+            mass_exp=0.05,
+            radius_exp=0.06,
+            hp_exp=0.06,
+            min_scale=0.6,
+            max_scale=1.9,
+        )
+        return self.tuning.healer_range * linked
 
     def _frontline_ally(
         self,
@@ -920,15 +1059,16 @@ class PhysicsWorld:
             nx = dx / distance
             ny = dy / distance
 
-        target.vx += nx * (force / max(1e-6, target.mass))
-        target.vy += (ny * 0.12 - 0.18) * (force / max(1e-6, target.mass))
+        effective_force = self._ranged_effective_force(actor, force)
+        target.vx += nx * (effective_force / max(1e-6, target.mass))
+        target.vy += (ny * 0.12 - 0.18) * (effective_force / max(1e-6, target.mass))
         target.stagger_timer = max(
             target.stagger_timer,
             min(self.tuning.max_stagger, self.tuning.stagger_base + 0.12),
         )
 
         if damage > 0 and not self.is_team_invincible(target.team):
-            scaled_damage = damage * max(0.6, actor.power)
+            scaled_damage = self._ranged_effective_damage(actor, damage)
             target.hp = max(0.0, target.hp - scaled_damage)
             target.last_damage = max(target.last_damage, scaled_damage)
 
@@ -951,20 +1091,21 @@ class PhysicsWorld:
             nx = dx / dist
             ny = dy / dist
 
-        spawn_dist = actor.radius + self.tuning.projectile_radius + 1.0
+        proj_radius = self._effective_projectile_radius(actor)
+        spawn_dist = actor.radius + proj_radius + 1.0
         proj = Projectile(
             proj_id=self.next_proj_id,
             owner_id=actor.body_id,
             team=actor.team,
             x=actor.x + nx * spawn_dist,
             y=actor.y + ny * spawn_dist,
-            vx=nx * self.tuning.projectile_speed,
-            vy=ny * self.tuning.projectile_speed,
-            radius=self.tuning.projectile_radius,
-            damage=damage,
-            knockback_force=knockback_force,
+            vx=nx * self._effective_projectile_speed(actor),
+            vy=ny * self._effective_projectile_speed(actor),
+            radius=proj_radius,
+            damage=self._ranged_effective_damage(actor, damage),
+            knockback_force=self._ranged_effective_force(actor, knockback_force),
             color=color or actor.color,
-            lifetime=self.tuning.projectile_lifetime,
+            lifetime=self._effective_projectile_lifetime(actor),
         )
         self.projectiles.append(proj)
         self.next_proj_id += 1
@@ -1045,13 +1186,13 @@ class PhysicsWorld:
 
             role = actor.role
             if role == "ranged_dealer":
-                target = self._closest_enemy(actor, self.tuning.ranged_attack_range)
+                target = self._closest_enemy(actor, self._ranged_effective_range(actor))
                 if target is None:
                     continue
                 self._spawn_projectile(
                     actor,
                     target,
-                    damage=self.tuning.ranged_damage * max(0.6, actor.power),
+                    damage=self.tuning.ranged_damage,
                     knockback_force=self.tuning.ranged_knockback_force,
                 )
                 self._apply_ranged_knockback(
@@ -1060,7 +1201,10 @@ class PhysicsWorld:
                     force=self.tuning.ranged_knockback_force,
                     damage=self.tuning.ranged_damage,
                 )
-                actor.ability_cooldown = self.tuning.ranged_attack_cooldown
+                actor.ability_cooldown = self._effective_ability_cooldown(
+                    self.tuning.ranged_attack_cooldown,
+                    actor,
+                )
             elif role == "healer":
                 target = self._frontline_ally(
                     actor,
@@ -1069,18 +1213,21 @@ class PhysicsWorld:
                 )
                 if target is None:
                     continue
-                heal = self.tuning.healer_amount * 0.8
+                heal = self._effective_heal_amount(actor, target, base_multiplier=0.8)
                 target.hp = min(target.max_hp, target.hp + heal)
                 target.heal_flash_timer = 0.20
-                actor.ability_cooldown = self.tuning.healer_cooldown
+                actor.ability_cooldown = self._effective_ability_cooldown(
+                    self.tuning.healer_cooldown,
+                    actor,
+                )
             elif role == "ranged_healer":
                 acted = False
-                heal_target = self._weakest_ally(actor, self.tuning.healer_range)
+                heal_target = self._weakest_ally(actor, self._healer_effective_range(actor))
                 if heal_target is not None:
-                    heal = self.tuning.healer_amount * 1.1
+                    heal = self._effective_heal_amount(actor, heal_target, base_multiplier=1.1)
                     heal_target.hp = min(heal_target.max_hp, heal_target.hp + heal)
                     acted = True
-                push_target = self._closest_enemy(actor, self.tuning.ranged_attack_range * 0.9)
+                push_target = self._closest_enemy(actor, self._ranged_effective_range(actor) * 0.9)
                 if push_target is not None:
                     self._apply_ranged_knockback(
                         actor,
@@ -1090,7 +1237,10 @@ class PhysicsWorld:
                     )
                     acted = True
                 if acted:
-                    actor.ability_cooldown = self.tuning.healer_cooldown
+                    actor.ability_cooldown = self._effective_ability_cooldown(
+                        self.tuning.healer_cooldown,
+                        actor,
+                    )
 
 
 def create_duel_world(

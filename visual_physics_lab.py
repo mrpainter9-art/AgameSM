@@ -24,73 +24,131 @@ from autochess_combat.physics_lab import PhysicsBody, PhysicsWorld
 
 FIELD_HELP_KO: dict[str, str] = {
     "balls_per_side": "좌/우 팀당 생성할 볼 개수. 기본 3.",
-    "left_radius": "왼쪽 공 반지름(px). 값이 커질수록 충돌 범위가 넓어집니다.",
-    "left_mass": "왼쪽 공 질량. 클수록 같은 힘에서 덜 밀리고, 반동/발사 속도 변화가 줄어듭니다.",
-    "left_power": "왼쪽 공 파워. 클수록 충돌 시 상대에게 주는 반동/피해/경직 영향이 커집니다.",
-    "left_hp": "왼쪽 공 최대 체력(리스폰 시 적용).",
-    "left_speed": "왼쪽 공 시작 수평 속도(px/s).",
+    "left_radius": "왼쪽 볼 반지름(px). 값이 커질수록 충돌 범위가 넓어집니다.",
+    "left_mass": "왼쪽 볼 질량. 클수록 같은 힘에서 덜 밀립니다.",
+    "left_power": "왼쪽 볼 파워. 클수록 충돌 시 반동/피해 영향이 커집니다.",
+    "left_hp": "왼쪽 볼 최대 체력(리스폰 시 적용).",
+    "left_speed": "왼쪽 볼 시작 수평 속도(px/s).",
     "left_invincible": "왼쪽 팀 무적 모드. 켜면 HP가 줄지 않습니다.",
-    "right_radius": "오른쪽 공 반지름(px).",
-    "right_mass": "오른쪽 공 질량.",
-    "right_power": "오른쪽 공 파워.",
-    "right_hp": "오른쪽 공 최대 체력(리스폰 시 적용).",
-    "right_speed": "오른쪽 공 시작 수평 속도(px/s).",
+    "right_radius": "오른쪽 볼 반지름(px).",
+    "right_mass": "오른쪽 볼 질량.",
+    "right_power": "오른쪽 볼 파워.",
+    "right_hp": "오른쪽 볼 최대 체력(리스폰 시 적용).",
+    "right_speed": "오른쪽 볼 시작 수평 속도(px/s).",
     "right_invincible": "오른쪽 팀 무적 모드. 켜면 HP가 줄지 않습니다.",
     "side_margin": "양쪽 벽에서 스폰되는 여백 거리(px).",
-    "gravity": "중력 가속도(px/s^2). 높일수록 더 빨리 떨어져 낮게 뜹니다.",
-    "approach_force": "정면 방향으로 밀어주는 추진력. 경직이 끝난 뒤 다시 돌진하는 속도에 영향.",
-    "restitution": "공-공 충돌 탄성 계수. 높을수록 더 튕깁니다.",
+    "gravity": "중력 가속도(px/s^2). 높을수록 더 빨리 떨어집니다.",
+    "approach_force": "정면 방향으로 밀어주는 추진력.",
+    "restitution": "볼-볼 충돌 탄성 계수. 높을수록 잘 튕깁니다.",
     "wall_restitution": "벽/바닥 반발 계수.",
     "linear_damping": "공기저항(속도 감쇠). 높을수록 전체 속도가 빨리 줄어듭니다.",
-    "friction": "공-공 충돌 시 접선 마찰.",
+    "friction": "볼-볼 충돌 시 접선 마찰.",
     "wall_friction": "벽 충돌 시 접선 마찰.",
     "ground_friction": "바닥에서 미끄러질 때 감속 마찰.",
-    "ground_snap_speed": "이 속도 이하로 바닥에 닿으면 y속도를 0으로 스냅합니다.",
-    "collision_boost": "충돌 임펄스 전체 배율. 충돌 반응을 강하게/약하게 만듭니다.",
-    "solver_passes": "충돌 해석 반복 횟수. 높을수록 안정적이지만 계산량이 늘어납니다.",
+    "ground_snap_speed": "이 속도 이하로 바닥에 닿으면 Y 속도를 0으로 고정합니다.",
+    "collision_boost": "충돌 임펄스 전체 배율.",
+    "solver_passes": "충돌 해석 반복 횟수.",
     "position_correction": "겹침 보정 강도(0~1).",
     "mass_power_impact_scale": "질량+파워 기반 충돌 영향량의 전체 배율.",
     "power_ratio_exponent": "파워 비율이 충돌 영향량에 반영되는 정도.",
-    "impact_speed_cap": "충돌 영향량 상한(과도한 값 제한).",
+    "impact_speed_cap": "충돌 영향량 상한.",
     "min_recoil_speed": "충돌 시 최소 수평 반동량.",
     "recoil_scale": "충돌 강도에 따른 수평 반동 증가율.",
-    "min_launch_speed": "충돌 시 최소 수직 발사량(위로 튀는 기본값).",
+    "min_launch_speed": "충돌 시 최소 수직 발사량.",
     "launch_scale": "충돌 강도에 따른 수직 발사 증가율.",
-    "launch_height_scale": (
-        "충돌 후 튀어오르는 높이 배율. 1.0 기본, 2.0이면 더 높게 뜹니다 "
-        "(최종 발사량은 Max Launch Speed 상한 적용)."
-    ),
+    "launch_height_scale": "충돌 후 튀어오르는 높이 배율(최종값은 최대 발사 속도 상한 적용).",
     "max_launch_speed": "수직 발사량 상한.",
     "damage_base": "충돌 시 기본 피해량.",
     "damage_scale": "충돌 강도에 따른 피해 증가율.",
     "stagger_base": "충돌 시 기본 경직 시간(초).",
     "stagger_scale": "충돌 강도에 따른 경직 증가율.",
     "max_stagger": "경직 시간 상한(초).",
-    "stagger_drive_multiplier": "경직 중 이동 추진력 배율(0이면 경직 중 거의 정지).",
-    "ranged_attack_cooldown": "원거리 딜러 공격 쿨타임(초).",
-    "ranged_attack_range": "원거리 딜러 공격 사거리(px).",
-    "ranged_knockback_force": "원거리 투사체 적중 시 넉백 힘.",
-    "ranged_damage": "원거리 투사체 기본 피해량.",
-    "healer_cooldown": "힐러 능력 쿨타임(초).",
-    "healer_range": "힐러 회복 사거리(px).",
-    "healer_amount": "힐러 기본 회복량.",
-    "projectile_speed": "투사체 이동 속도(px/s).",
+    "stagger_drive_multiplier": "경직 중 이동 추진력 배율.",
+    "ranged_attack_cooldown": "원거리 공격 쿨다운(초).",
+    "ranged_attack_range": "원거리 공격 사거리(px).",
+    "ranged_knockback_force": "원거리 공격 넉백 힘.",
+    "ranged_damage": "원거리 공격 피해량.",
+    "healer_cooldown": "치유 스킬 쿨다운(초).",
+    "healer_range": "치유 스킬 범위(px).",
+    "healer_amount": "치유 1회 회복량.",
+    "projectile_speed": "투사체 속도(px/s).",
     "projectile_radius": "투사체 반지름(px).",
-    "projectile_lifetime": "투사체 최대 생존 시간(초).",
-    "team": "소속 팀(left / right).",
-    "role": "유닛 역할. tank, dealer, healer, ranged_dealer, ranged_healer.",
-    "color": "유닛 표시 색상(HEX 코드).",
-    "radius": "유닛 크기(px). 클수록 충돌 범위가 넓어집니다.",
-    "mass": "유닛 무게. 클수록 같은 힘에서 덜 밀리고 반동이 줄어듭니다.",
-    "power": "공격력. 클수록 충돌/투사체로 주는 반동·피해·경직이 커집니다.",
-    "hp": "현재 체력(리스폰 시 적용).",
-    "max_hp": "최대 체력. 힐로 이 값을 초과할 수 없습니다.",
-    "vx": "시작 수평 속도(px/s). 부호는 팀에 따라 자동 조정됩니다.",
-    "vy": "시작 수직 속도(px/s). 음수면 위로 뜹니다.",
-    "forward_dir": "진행 방향. 1=오른쪽, -1=왼쪽.",
-    "x": "커스텀 X 좌표(비워두면 자동 배치).",
-    "y": "커스텀 Y 좌표(비워두면 자동 배치).",
+    "projectile_lifetime": "투사체 유지 시간(초).",
+    "team": "볼 소속 팀(left/right).",
+    "role": "볼 역할(tank/dealer/healer/ranged_dealer/ranged_healer).",
+    "color": "볼 색상(HEX).",
+    "radius": "볼 반지름(px).",
+    "mass": "볼 질량.",
+    "power": "볼 파워.",
+    "hp": "현재 체력.",
+    "max_hp": "최대 체력.",
+    "vx": "초기 X축 속도(px/s).",
+    "vy": "초기 Y축 속도(px/s).",
+    "forward_dir": "진행 방향(1 또는 -1).",
+    "x": "초기 X 좌표(비우면 자동 배치).",
+    "y": "초기 Y 좌표(비우면 자동 배치).",
 }
+
+ENV_PHYSICS_CATEGORIES: list[tuple[str, list[tuple[str, str]]]] = [
+    (
+        "World",
+        [
+            ("side_margin", "Side Margin"),
+            ("gravity", "Gravity"),
+            ("approach_force", "Approach Force"),
+            ("linear_damping", "Linear Damping"),
+            ("ground_friction", "Ground Friction"),
+            ("ground_snap_speed", "Ground Snap Speed"),
+        ],
+    ),
+    (
+        "Collision",
+        [
+            ("restitution", "Restitution"),
+            ("wall_restitution", "Wall Restitution"),
+            ("friction", "Collision Friction"),
+            ("wall_friction", "Wall Friction"),
+            ("collision_boost", "Collision Boost"),
+            ("solver_passes", "Solver Passes"),
+            ("position_correction", "Position Correction"),
+        ],
+    ),
+    (
+        "Impact / Damage",
+        [
+            ("mass_power_impact_scale", "Mass+Power Scale"),
+            ("power_ratio_exponent", "Power Ratio Exp"),
+            ("impact_speed_cap", "Impact Speed Cap"),
+            ("min_recoil_speed", "Min Recoil Speed"),
+            ("recoil_scale", "Recoil Scale"),
+            ("min_launch_speed", "Min Launch Speed"),
+            ("launch_scale", "Launch Scale"),
+            ("launch_height_scale", "Launch Height Scale"),
+            ("max_launch_speed", "Max Launch Speed"),
+            ("damage_base", "Damage Base"),
+            ("damage_scale", "Damage Scale"),
+            ("stagger_base", "Stagger Base"),
+            ("stagger_scale", "Stagger Scale"),
+            ("max_stagger", "Max Stagger"),
+            ("stagger_drive_multiplier", "Stagger Drive Mult"),
+        ],
+    ),
+    (
+        "Skills / Projectile",
+        [
+            ("ranged_attack_cooldown", "Ranged Cooldown"),
+            ("ranged_attack_range", "Ranged Range"),
+            ("ranged_knockback_force", "Ranged Knockback"),
+            ("ranged_damage", "Ranged Damage"),
+            ("healer_cooldown", "Healer Cooldown"),
+            ("healer_range", "Healer Range"),
+            ("healer_amount", "Healer Amount"),
+            ("projectile_speed", "Projectile Speed"),
+            ("projectile_radius", "Projectile Radius"),
+            ("projectile_lifetime", "Projectile Lifetime"),
+        ],
+    ),
+]
 
 SETTINGS_FILE_NAME = "visual_physics_lab_settings.json"
 SETTINGS_VERSION = 1
@@ -494,7 +552,7 @@ class PhysicsLabApp:
         editor.columnconfigure(3, weight=1)
         erow = 0
 
-        team_label = ttk.Label(editor, text="팀")
+        team_label = ttk.Label(editor, text="\uD300")
         team_label.grid(row=erow, column=0, sticky="w", pady=2)
         team_combo = ttk.Combobox(
             editor,
@@ -506,7 +564,7 @@ class PhysicsLabApp:
         team_combo.grid(row=erow, column=1, sticky="ew", pady=2, padx=(0, 8))
         self._bind_field_help(team_label, "team")
         self._bind_field_help(team_combo, "team")
-        role_label = ttk.Label(editor, text="역할")
+        role_label = ttk.Label(editor, text="\uC5ED\uD560")
         role_label.grid(row=erow, column=2, sticky="w", pady=2)
         role_combo = ttk.Combobox(
             editor,
@@ -519,14 +577,14 @@ class PhysicsLabApp:
         self._bind_field_help(role_label, "role")
         self._bind_field_help(role_combo, "role")
         erow += 1
-        color_label = ttk.Label(editor, text="색상")
+        color_label = ttk.Label(editor, text="\uC0C9\uC0C1")
         color_label.grid(row=erow, column=0, sticky="w", pady=2)
         color_entry = ttk.Entry(editor, textvariable=self.ball_editor_vars["color"], width=10)
         color_entry.grid(row=erow, column=1, sticky="ew", pady=2, padx=(0, 8))
         self._bind_field_help(color_label, "color")
         self._bind_field_help(color_entry, "color")
-        ttk.Label(editor, text="프리셋").grid(row=erow, column=2, sticky="w", pady=2)
-        ttk.Label(editor, text="역할 빠른 적용").grid(row=erow, column=3, sticky="w", pady=2)
+        ttk.Label(editor, text="\uD074\uB798\uC2A4").grid(row=erow, column=2, sticky="w", pady=2)
+        ttk.Label(editor, text="\uBE60\uB978 \uD504\uB9AC\uC14B").grid(row=erow, column=3, sticky="w", pady=2)
         erow += 1
         preset_row = ttk.Frame(editor)
         preset_row.grid(row=erow, column=0, columnspan=4, sticky="ew", pady=(0, 4))
@@ -548,11 +606,11 @@ class PhysicsLabApp:
         erow += 1
 
         for left_key, left_label, right_key, right_label in [
-            ("radius", "크기", "mass", "무게"),
-            ("power", "공격력", "hp", "체력"),
-            ("max_hp", "최대체력", "vx", "수평속도"),
-            ("vy", "수직속도", "forward_dir", "방향"),
-            ("x", "X좌표", "y", "Y좌표"),
+            ("radius", "Radius", "mass", "Mass"),
+            ("power", "Power", "hp", "HP"),
+            ("max_hp", "Max HP", "vx", "Vx"),
+            ("vy", "Vy", "forward_dir", "Forward"),
+            ("x", "X", "y", "Y"),
         ]:
             ll = ttk.Label(editor, text=left_label)
             ll.grid(row=erow, column=0, sticky="w", pady=2)
@@ -638,55 +696,43 @@ class PhysicsLabApp:
         self._refresh_template_list()
 
     def _build_environment_panel(self, parent: ttk.LabelFrame) -> None:
-        fields = [
-            ("side_margin", "Side Margin"),
-            ("gravity", "Gravity"),
-            ("approach_force", "Approach Force"),
-            ("restitution", "Restitution"),
-            ("wall_restitution", "Wall Restitution"),
-            ("linear_damping", "Linear Damping"),
-            ("friction", "Collision Friction"),
-            ("wall_friction", "Wall Friction"),
-            ("ground_friction", "Ground Friction"),
-            ("ground_snap_speed", "Ground Snap Speed"),
-            ("collision_boost", "Collision Boost"),
-            ("solver_passes", "Solver Passes"),
-            ("position_correction", "Position Correction"),
-            ("mass_power_impact_scale", "Mass+Power Scale"),
-            ("power_ratio_exponent", "Power Ratio Exp"),
-            ("impact_speed_cap", "Impact Speed Cap"),
-            ("min_recoil_speed", "Min Recoil Speed"),
-            ("recoil_scale", "Recoil Scale"),
-            ("min_launch_speed", "Min Launch Speed"),
-            ("launch_scale", "Launch Scale"),
-            ("launch_height_scale", "Launch Height Scale"),
-            ("max_launch_speed", "Max Launch Speed"),
-            ("damage_base", "Damage Base"),
-            ("damage_scale", "Damage Scale"),
-            ("stagger_base", "Stagger Base"),
-            ("stagger_scale", "Stagger Scale"),
-            ("max_stagger", "Max Stagger"),
-            ("stagger_drive_multiplier", "Stagger Drive Mult"),
-        ]
-        pairs_per_row = 4
+        parent.columnconfigure(0, weight=1)
+        note = ttk.Label(
+            parent,
+            text="Settings are grouped by gameplay category for faster tuning.",
+            justify="left",
+        )
+        note.grid(row=0, column=0, sticky="w", pady=(0, 6))
+
+        notebook = ttk.Notebook(parent)
+        notebook.grid(row=1, column=0, sticky="ew")
+
+        for title, fields in ENV_PHYSICS_CATEGORIES:
+            tab = ttk.Frame(notebook, padding=(10, 8))
+            notebook.add(tab, text=title)
+            self._build_environment_category_fields(tab, fields)
+
+    def _build_environment_category_fields(
+        self,
+        parent: ttk.Frame,
+        fields: list[tuple[str, str]],
+    ) -> None:
+        pairs_per_row = 2
         for col in range(pairs_per_row * 2):
             if col % 2 == 1:
                 parent.columnconfigure(col, weight=1)
 
-            for idx, (key, label) in enumerate(fields):
-                row = idx // 2
-                col = (idx % 2) * 2
-
-                label_widget = ttk.Label(tab, text=label)
-                label_widget.grid(row=row, column=col, sticky="w", padx=(0, 6), pady=4)
-
-                entry_widget = ttk.Entry(tab, textvariable=self.vars[key], width=12)
-                entry_widget.grid(row=row, column=col + 1, sticky="ew", padx=(0, 20), pady=4)
-
-                self.value_widgets[key] = entry_widget
-                self._bind_field_help(label_widget, key)
-                self._bind_field_help(entry_widget, key)
-                self._apply_widget_lock_state(key)
+        for idx, (key, label) in enumerate(fields):
+            row = idx // pairs_per_row
+            col = (idx % pairs_per_row) * 2
+            label_widget = ttk.Label(parent, text=label)
+            label_widget.grid(row=row, column=col, sticky="w", padx=(0, 6), pady=3)
+            entry_widget = ttk.Entry(parent, textvariable=self.vars[key], width=11)
+            entry_widget.grid(row=row, column=col + 1, sticky="ew", padx=(0, 12), pady=3)
+            self.value_widgets[key] = entry_widget
+            self._bind_field_help(label_widget, key)
+            self._bind_field_help(entry_widget, key)
+            self._apply_widget_lock_state(key)
 
     def _default_ball_specs(self) -> list[dict[str, object]]:
         default_balls: list[dict[str, object]] = []
@@ -2256,24 +2302,42 @@ class PhysicsLabApp:
     def _check_battle_end(self) -> None:
         if self.battle_over:
             return
-        alive = self._alive_bodies()
-        if len(alive) > 1:
+
+        left_bodies = [body for body in self.world.bodies if body.team == "left"]
+        right_bodies = [body for body in self.world.bodies if body.team == "right"]
+        left_total = len(left_bodies)
+        right_total = len(right_bodies)
+        if left_total == 0 or right_total == 0:
             return
 
-        left_alive = sum(1 for body in self.world.bodies if body.team == "left" and body.is_alive)
-        right_alive = sum(1 for body in self.world.bodies if body.team == "right" and body.is_alive)
-        left_hp = sum(body.hp for body in self.world.bodies if body.team == "left")
-        right_hp = sum(body.hp for body in self.world.bodies if body.team == "right")
-        if len(alive) == 0:
-            winner_text = "전멸 무승부"
+        left_alive = sum(1 for body in left_bodies if body.is_alive)
+        right_alive = sum(1 for body in right_bodies if body.is_alive)
+        if left_alive > 0 and right_alive > 0:
+            return
+
+        left_hp = sum(max(0.0, body.hp) for body in left_bodies)
+        right_hp = sum(max(0.0, body.hp) for body in right_bodies)
+        left_max_hp = sum(max(0.0, body.max_hp) for body in left_bodies)
+        right_max_hp = sum(max(0.0, body.max_hp) for body in right_bodies)
+
+        elapsed = max(0.0, self.world.time_elapsed)
+        minutes = int(elapsed // 60)
+        seconds = elapsed - (minutes * 60)
+        time_str = f"{minutes:02d}:{seconds:05.2f}"
+
+        if left_alive == 0 and right_alive == 0:
+            winner_text = "무승부"
+        elif right_alive == 0:
+            winner_text = "LEFT 승리"
         else:
-            winner_text = f"{alive[0].team.upper()} 승리"
+            winner_text = "RIGHT 승리"
+
         self.battle_report_text = (
             f"{'=' * 28}\n"
             f"  {winner_text}\n"
             f"{'=' * 28}\n"
             f"\n"
-            f"  경과 시간: {time_str}\n"
+            f"  전투 시간: {time_str}\n"
             f"  총 충돌: {self.world.total_collisions}회\n"
             f"\n"
             f"  LEFT   생존 {left_alive}/{left_total}"
@@ -2281,20 +2345,19 @@ class PhysicsLabApp:
             f"  RIGHT  생존 {right_alive}/{right_total}"
             f"   HP {right_hp:.0f}/{right_max_hp:.0f}\n"
             f"\n"
-            f"  클릭하면 다시 시작"
+            f"  중앙 패널 클릭 시 다시 시작"
         )
         self.battle_over = True
         self.paused = True
         self.status_message = "Battle finished. Click center overlay to respawn."
         self._refresh_status()
 
-        # 팝업 표시
         result_message = (
             f"{winner_text}\n\n"
-            f"⏱️ 경과 시간: {self.world.time_elapsed:.2f}초\n"
-            f"💥 총 충돌: {self.world.total_collisions}회\n\n"
-            f"🔵 LEFT 팀 - 생존: {left_alive}, HP: {left_hp:.1f}\n"
-            f"🔴 RIGHT 팀 - 생존: {right_alive}, HP: {right_hp:.1f}"
+            f"전투 시간: {time_str}\n"
+            f"총 충돌: {self.world.total_collisions}회\n\n"
+            f"LEFT 팀 - 생존: {left_alive}/{left_total}, HP: {left_hp:.1f}/{left_max_hp:.1f}\n"
+            f"RIGHT 팀 - 생존: {right_alive}/{right_total}, HP: {right_hp:.1f}/{right_max_hp:.1f}"
         )
         messagebox.showinfo("⚔️ 전투 종료", result_message)
 
@@ -2366,6 +2429,64 @@ class PhysicsLabApp:
         )
         self.status_var.set(f"{self.status_message}\n{live}")
 
+    @staticmethod
+    def _blend_hex_color(start_hex: str, end_hex: str, t: float) -> str:
+        blend = max(0.0, min(1.0, t))
+        start = start_hex.lstrip("#")
+        end = end_hex.lstrip("#")
+        if len(start) != 6 or len(end) != 6:
+            return start_hex
+        sr = int(start[0:2], 16)
+        sg = int(start[2:4], 16)
+        sb = int(start[4:6], 16)
+        er = int(end[0:2], 16)
+        eg = int(end[2:4], 16)
+        eb = int(end[4:6], 16)
+        rr = int(sr + ((er - sr) * blend))
+        rg = int(sg + ((eg - sg) * blend))
+        rb = int(sb + ((eb - sb) * blend))
+        return f"#{rr:02x}{rg:02x}{rb:02x}"
+
+    def _draw_combat_vfx(self) -> None:
+        fade_target = "#121923"
+        for effect in self._death_particles:
+            life = 0.0 if effect.duration <= 0 else max(0.0, min(1.0, effect.ttl / effect.duration))
+            radius = max(0.7, effect.radius * life)
+            fill = self._blend_hex_color(effect.color, fade_target, 1.0 - life)
+            self.canvas.create_oval(
+                effect.x - radius,
+                effect.y - radius,
+                effect.x + radius,
+                effect.y + radius,
+                fill=fill,
+                outline="",
+            )
+
+        for effect in self._ring_effects:
+            life = 0.0 if effect.duration <= 0 else max(0.0, min(1.0, effect.ttl / effect.duration))
+            progress = 1.0 - life
+            radius = effect.start_radius + ((effect.end_radius - effect.start_radius) * progress)
+            outline = self._blend_hex_color(effect.color, fade_target, 1.0 - life)
+            self.canvas.create_oval(
+                effect.x - radius,
+                effect.y - radius,
+                effect.x + radius,
+                effect.y + radius,
+                outline=outline,
+                width=max(1.0, effect.width * life),
+            )
+
+        for effect in self._floating_text_effects:
+            life = 0.0 if effect.duration <= 0 else max(0.0, min(1.0, effect.ttl / effect.duration))
+            text_color = self._blend_hex_color(effect.color, fade_target, 1.0 - life)
+            self.canvas.create_text(
+                effect.x,
+                effect.y,
+                text=effect.text,
+                fill=text_color,
+                font=("Consolas", max(8, effect.font_size), "bold"),
+            )
+
     def _draw_world(self) -> None:
         self.canvas.delete("all")
 
@@ -2405,28 +2526,62 @@ class PhysicsLabApp:
         )
 
         for body in self.world.bodies:
-            r = body.radius
-            fill = body.color if body.is_alive else "#777777"
-            self.canvas.create_oval(
-                body.x - r,
-                body.y - r,
-                body.x + r,
-                body.y + r,
-                fill=fill,
-                outline="#0a0a0a",
-                width=2,
-            )
-            self.canvas.create_line(
-                body.x,
-                body.y,
-                body.x - body.vx * 0.08,
-                body.y - body.vy * 0.08,
-                fill="#f6f7f9",
-                width=1,
-            )
+            if not body.is_alive and body.body_id in self._vanished_body_ids:
+                continue
 
-            hp_ratio = 0.0 if body.max_hp <= 0 else max(0.0, min(1.0, body.hp / body.max_hp))
-            bar_w = max(28.0, r * 2.0)
+            death_fade = self._death_fade_by_body_id.get(body.body_id)
+            if body.is_alive:
+                draw_x = body.x
+                draw_y = body.y
+                draw_r = body.radius
+                draw_fill = body.color
+                draw_outline = "#0a0a0a"
+                draw_width = 2.0
+                draw_velocity = True
+            elif death_fade is not None and death_fade.duration > 0:
+                fade_life = max(0.0, min(1.0, death_fade.ttl / death_fade.duration))
+                draw_x = death_fade.x
+                draw_y = death_fade.y
+                draw_r = death_fade.radius * (0.28 + (0.72 * fade_life))
+                draw_fill = self._blend_hex_color(death_fade.base_color, "#121923", 1.0 - fade_life)
+                draw_outline = self._blend_hex_color("#f4f7fc", "#121923", 1.0 - fade_life)
+                draw_width = max(1.0, 2.0 * fade_life)
+                draw_velocity = False
+            else:
+                draw_x = body.x
+                draw_y = body.y
+                draw_r = body.radius
+                draw_fill = "#777777"
+                draw_outline = "#0a0a0a"
+                draw_width = 1.6
+                draw_velocity = False
+
+            self.canvas.create_oval(
+                draw_x - draw_r,
+                draw_y - draw_r,
+                draw_x + draw_r,
+                draw_y + draw_r,
+                fill=draw_fill,
+                outline=draw_outline,
+                width=draw_width,
+            )
+            if draw_velocity:
+                self.canvas.create_line(
+                    body.x,
+                    body.y,
+                    body.x - body.vx * 0.08,
+                    body.y - body.vy * 0.08,
+                    fill="#f6f7f9",
+                    width=1,
+                )
+
+            if not body.is_alive:
+                continue
+
+            hp_anim = self._ensure_hp_bar_anim_state(body)
+            display_ratio = hp_anim.display_ratio
+            chip_ratio = hp_anim.chip_ratio
+            bar_w = max(28.0, draw_r * 2.0)
             bar_h = 7.0
             bar_x0 = draw_x - (bar_w * 0.5)
             bar_y0 = draw_y - draw_r - 24
@@ -2439,6 +2594,8 @@ class PhysicsLabApp:
                 outline="#111820",
                 width=1,
             )
+            chip_x1 = bar_x0 + (bar_w * chip_ratio)
+            display_x1 = bar_x0 + (bar_w * display_ratio)
             self.canvas.create_rectangle(
                 bar_x0,
                 bar_y0,
@@ -2484,6 +2641,44 @@ class PhysicsLabApp:
                 fill="#dce6f2",
                 font=("Consolas", 10),
             )
+
+        for projectile in self.world.projectiles:
+            if not projectile.active:
+                continue
+
+            r = projectile.radius
+            team = getattr(projectile, "team", "left")
+            fill_color = getattr(projectile, "color", "#4aa3ff" if team == "left" else "#f26b5e")
+            self.canvas.create_oval(
+                projectile.x - r,
+                projectile.y - r,
+                projectile.x + r,
+                projectile.y + r,
+                fill=fill_color,
+                outline="#ffffff",
+                width=2,
+            )
+
+            tail_length = 15.0
+            speed = math.hypot(projectile.vx, projectile.vy)
+            if speed > 1e-9:
+                tail_x = projectile.x - (projectile.vx / speed) * tail_length
+                tail_y = projectile.y - (projectile.vy / speed) * tail_length
+            else:
+                tail_x = projectile.x
+                tail_y = projectile.y
+
+            self.canvas.create_line(
+                projectile.x,
+                projectile.y,
+                tail_x,
+                tail_y,
+                fill=fill_color,
+                width=3,
+                arrow=tk.FIRST,
+            )
+
+        self._draw_combat_vfx()
 
         self.canvas.create_text(
             14,
@@ -2561,3 +2756,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
